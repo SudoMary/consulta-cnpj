@@ -1,4 +1,4 @@
-"""Validação de CNPJ.
+"""Validação e formatação de CNPJ.
 
 CNPJ tem 14 dígitos; os 2 últimos são dígitos verificadores calculados a
 partir dos 12 primeiros. Se a conta não fecha, o número foi digitado errado
@@ -45,3 +45,23 @@ def cnpj_valido(texto: str | None) -> bool:
 
     dv2 = _digito_verificador(digitos[:13], PESOS_DV2)
     return dv2 == digitos[13]
+
+
+def formata_cnpj(texto: str | None) -> str | None:
+    """Formata um CNPJ para o padrão XX.XXX.XXX/XXXX-XX.
+
+    Não valida os dígitos verificadores — formatação e validação são coisas
+    diferentes. Aceita com ou sem máscara e é idempotente.
+
+    Retorna a entrada inalterada quando não é possível formatar (vazio, None,
+    ou texto sem exatamente 14 dígitos). Devolver o valor cru é melhor que
+    quebrar a exibição: o chamador decide se aquilo é erro.
+    """
+    if texto is None:
+        return None
+
+    digitos = so_digitos(texto)
+    if len(digitos) != 14:
+        return texto
+
+    return f"{digitos[:2]}.{digitos[2:5]}.{digitos[5:8]}/{digitos[8:12]}-{digitos[12:]}"

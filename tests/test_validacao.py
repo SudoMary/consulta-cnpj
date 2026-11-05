@@ -1,4 +1,4 @@
-"""Testes da validação de CNPJ.
+"""Testes da validação e formatação de CNPJ.
 
 CNPJ tem 14 dígitos; os dois últimos são dígitos verificadores calculados
 a partir dos 12 primeiros. Um CNPJ válido passa na conta; qualquer erro de
@@ -9,7 +9,7 @@ CNPJ de referência: 11.222.333/0001-81 (sem máscara: 11222333000181).
 
 from __future__ import annotations
 
-from validacao import cnpj_valido, so_digitos
+from validacao import cnpj_valido, formata_cnpj, so_digitos
 
 CNPJ_VALIDO = "11222333000181"
 CNPJ_VALIDO_COM_MASCARA = "11.222.333/0001-81"
@@ -95,3 +95,39 @@ class TestCnpjValido:
     def test_none_e_recusado(self) -> None:
         # type: ignore[arg-type]
         assert cnpj_valido(None) is False
+
+
+class TestFormataCnpj:
+    def test_formata_sem_mascara(self) -> None:
+        # Arrange
+        cnpj = CNPJ_VALIDO
+
+        # Act
+        resultado = formata_cnpj(cnpj)
+
+        # Assert
+        assert resultado == CNPJ_VALIDO_COM_MASCARA
+
+    def test_formata_com_mascara_e_idempotente(self) -> None:
+        # Arrange
+        cnpj = CNPJ_VALIDO_COM_MASCARA
+
+        # Act
+        resultado = formata_cnpj(cnpj)
+
+        # Assert
+        assert resultado == CNPJ_VALIDO_COM_MASCARA
+
+    def test_14_digitos_invalidos_ainda_formatam(self) -> None:
+        # formata_cnpj NAO valida DV; formata qualquer sequencia de 14 digitos
+        assert formata_cnpj("00000000000000") == "00.000.000/0000-00"
+
+    def test_texto_com_menos_de_14_digitos_devolve_entrada(self) -> None:
+        assert formata_cnpj("1122233300") == "1122233300"
+
+    def test_string_vazia_devolve_string_vazia(self) -> None:
+        assert formata_cnpj("") == ""
+
+    def test_none_devolve_none(self) -> None:
+        # type: ignore[arg-type]
+        assert formata_cnpj(None) is None
