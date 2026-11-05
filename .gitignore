@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Banco local
+*.db
+*.sqlite
+*.sqlite3
+dados/*.db
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+
+# Saída
+saida/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Vault Obsidian e skills (documentação local — não vão para o repositório público)
+vault/
+skills/
+
+# Metadados do agente
+.deepseek_ui/
