@@ -1,5 +1,7 @@
 # Consulta de CNPJ com histórico
 
+[![CI](https://github.com/SudoMary/consulta-cnpj/actions/workflows/ci.yml/badge.svg)](https://github.com/SudoMary/consulta-cnpj/actions/workflows/ci.yml)
+
 > Recebe um CNPJ, busca os dados cadastrais em API pública, guarda cada consulta e mostra o que mudou entre elas.
 
 ## O problema
@@ -12,13 +14,16 @@ Consultar é fácil — existe API pública para isso. O que não existe pronto 
 
 ## Como rodar
 
-> **Em construção.** Primeira entrega (validador de CNPJ) ainda não implementada. Este README será atualizado em cada entrega.
+**Estado:** Entrega 1 concluída (validador de CNPJ). Consulta à API, banco e tela chegam nas Entregas 2 e 3.
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate            # Windows
 # source .venv/bin/activate       # macOS / Linux
 pip install -r requirements-dev.txt
+
+pytest -q                                  # testes
+ruff check . && ruff format --check .      # lint
 ```
 
 ## Decisões de projeto
