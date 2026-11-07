@@ -12,8 +12,10 @@ PESOS_DV2 = (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
 
 
 def so_digitos(texto: str) -> str:
-    """Devolve apenas os dígitos do texto, sem máscara."""
-    return "".join(c for c in texto if c.isdigit())
+    """Devolve apenas os dígitos de 0 a 9 do texto, sem máscara."""
+    # Não usa `str.isdigit()`: ele aceita "²", que derruba o `int()` do cálculo
+    # do DV, e dígitos de outros alfabetos, que seguiriam para a URL da API.
+    return "".join(c for c in texto if c in "0123456789")
 
 
 def _digito_verificador(digitos: str, pesos: tuple[int, ...]) -> str:

@@ -46,6 +46,10 @@ class TestSoDigitos:
         # Assert
         assert resultado == ""
 
+    def test_ignora_digito_que_nao_e_ascii(self) -> None:
+        # "²" e U+0661 (1 arábico) passam em str.isdigit(), mas não são dígitos de CNPJ
+        assert so_digitos("\u00b21\u06612") == "12"
+
 
 class TestCnpjValido:
     def test_cnpj_valido_sem_mascara(self) -> None:
@@ -95,6 +99,15 @@ class TestCnpjValido:
     def test_none_e_recusado(self) -> None:
         # type: ignore[arg-type]
         assert cnpj_valido(None) is False
+
+    def test_expoente_e_recusado_sem_estourar(self) -> None:
+        # "²" no lugar de um dígito derrubava o int() do cálculo com ValueError
+        assert cnpj_valido("\u00b21222333000181") is False
+
+    def test_digito_de_outro_alfabeto_e_recusado(self) -> None:
+        # U+0661 é o 1 arábico: int() aceita, a conta fechava e o texto
+        # não ASCII seguiria para a URL da API
+        assert cnpj_valido("\u06611222333000181") is False
 
 
 class TestFormataCnpj:
