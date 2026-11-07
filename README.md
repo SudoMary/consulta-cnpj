@@ -14,13 +14,16 @@ Consultar é fácil — existe API pública para isso. O que não existe pronto 
 
 ## Como rodar
 
-**Estado:** Entrega 1 concluída (validador de CNPJ). Consulta à API, banco e tela chegam nas Entregas 2 e 3.
+**Estado:** Entrega 2 concluída: consulta, histórico e detecção de mudança pela linha de comando. A tela web e a coleta agendada chegam na Entrega 3.
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate            # Windows
 # source .venv/bin/activate       # macOS / Linux
 pip install -r requirements-dev.txt
+
+python -m src.cli consultar 11.222.333/0001-81             # usa o cache de 24 horas
+python -m src.cli consultar 11.222.333/0001-81 --forcar    # ignora o cache
 
 pytest -q                                  # testes
 ruff check . && ruff format --check .      # lint
