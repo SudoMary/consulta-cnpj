@@ -9,8 +9,8 @@ import sqlite3
 
 import pytest
 
-from db import conectar
-from repo import (
+from src.db import conectar
+from src.repo import (
     atualizar_ultima_consulta,
     empresa_por_cnpj,
     inserir_empresa_se_nao_existe,

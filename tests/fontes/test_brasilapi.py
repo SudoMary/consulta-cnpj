@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fontes.brasilapi import normalizar
+from src.fontes.brasilapi import normalizar
 
 
 class TestNormalizar:

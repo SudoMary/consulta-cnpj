@@ -15,9 +15,9 @@ from typing import Any
 import httpx
 import pytest
 
-from db import conectar
-from fontes import brasilapi, minhareceita
-from repo import inserir_empresa_se_nao_existe, inserir_observacao, observacoes_por_cnpj
+from src.db import conectar
+from src.fontes import brasilapi, minhareceita
+from src.repo import inserir_empresa_se_nao_existe, inserir_observacao, observacoes_por_cnpj
 
 CNPJ = "11222333000181"
 BASE_URL = "https://fonte.exemplo/api"

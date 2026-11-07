@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from config import Settings
+from src.config import Settings
 
 
 def _settings_sem_env_file() -> Settings:

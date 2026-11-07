@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fontes.minhareceita import normalizar
+from src.fontes.minhareceita import normalizar
 
 
 class TestNormalizar:

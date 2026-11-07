@@ -10,7 +10,7 @@ import sqlite3
 
 import pytest
 
-from db import conectar
+from src.db import conectar
 
 
 class TestConectar:

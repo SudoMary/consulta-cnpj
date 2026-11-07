@@ -9,7 +9,7 @@ CNPJ de referência: 11.222.333/0001-81 (sem máscara: 11222333000181).
 
 from __future__ import annotations
 
-from validacao import cnpj_valido, formata_cnpj, so_digitos
+from src.validacao import cnpj_valido, formata_cnpj, so_digitos
 
 CNPJ_VALIDO = "11222333000181"
 CNPJ_VALIDO_COM_MASCARA = "11.222.333/0001-81"
