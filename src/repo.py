@@ -93,6 +93,19 @@ def observacoes_por_cnpj(con: sqlite3.Connection, cnpj: str) -> list[dict[str, A
     return [_row_para_dict(r) for r in rows]  # type: ignore[misc]
 
 
+def observacao_mais_nova(con: sqlite3.Connection, cnpj: str) -> dict[str, Any] | None:
+    """A observação mais recente da empresa, ou ``None`` se ainda não houver.
+
+    Mesmo desempate de `observacoes_por_cnpj`: ``id`` decide quando duas
+    coletas caem no mesmo segundo.
+    """
+    row = con.execute(
+        "SELECT * FROM observacao WHERE cnpj = ? ORDER BY coletado_em DESC, id DESC LIMIT 1",
+        (cnpj,),
+    ).fetchone()
+    return _row_para_dict(row)
+
+
 def atualizar_ultima_consulta(con: sqlite3.Connection, cnpj: str, agora: str) -> None:
     """Atualiza ``empresa.ultima_consulta``. Não toca em ``primeira_consulta``."""
     con.execute(

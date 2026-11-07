@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     http_timeout_segundos: int = Field(default=8, gt=0)
     database_url: str = "sqlite:///./dados/consulta_cnpj.db"
 
+    @property
+    def caminho_banco(self) -> str:
+        """Caminho do arquivo SQLite, que é o que `conectar` recebe."""
+        return self.database_url.removeprefix("sqlite:///")
+
 
 @lru_cache
 def get_settings() -> Settings:

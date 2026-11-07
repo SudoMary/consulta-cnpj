@@ -17,7 +17,7 @@
 CREATE TABLE IF NOT EXISTS empresa (
     -- 14 digitos, sem mascara. TEXT e nao INTEGER: CNPJ pode comecar com 0.
     cnpj              TEXT    PRIMARY KEY CHECK (length(cnpj) = 14),
-    -- ISO 'YYYY-MM-DD HH:MM:SS'; TEXT ordena bem e nao perde fuso.
+    -- ISO 'YYYY-MM-DD HH:MM:SS', sempre em UTC; nesse formato, TEXT ordena como data.
     primeira_consulta TEXT    NOT NULL,
     ultima_consulta   TEXT    NOT NULL,
     -- 1 = recoleta diaria; 0 = so o que ja foi consultado.

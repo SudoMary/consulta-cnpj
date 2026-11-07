@@ -15,6 +15,7 @@ from src.repo import (
     empresa_por_cnpj,
     inserir_empresa_se_nao_existe,
     inserir_observacao,
+    observacao_mais_nova,
     observacoes_por_cnpj,
     registrar_falha,
 )
@@ -160,6 +161,40 @@ class TestObservacoesPorCnpj:
 
         assert len(resultado) == 1
         assert resultado[0]["cnpj"] == CNPJ
+
+
+class TestObservacaoMaisNova:
+    def _gravar(self, con: sqlite3.Connection, cnpj: str, quando: str, situacao: str) -> None:
+        inserir_empresa_se_nao_existe(con, cnpj, T0)
+        inserir_observacao(
+            con,
+            cnpj=cnpj,
+            dados={"situacao": situacao},
+            fonte="brasilapi",
+            coletado_em=quando,
+            bruto_json="{}",
+        )
+
+    def test_none_quando_nao_ha_observacoes(self, con: sqlite3.Connection) -> None:
+        assert observacao_mais_nova(con, CNPJ) is None
+
+    def test_devolve_a_de_coleta_mais_recente(self, con: sqlite3.Connection) -> None:
+        # insiro fora de ordem de propósito
+        for quando in (T2, T0, T1):
+            self._gravar(con, CNPJ, quando, "ATIVA")
+
+        assert observacao_mais_nova(con, CNPJ)["coletado_em"] == T2
+
+    def test_no_mesmo_segundo_vence_a_ultima_gravada(self, con: sqlite3.Connection) -> None:
+        self._gravar(con, CNPJ, T0, "ATIVA")
+        self._gravar(con, CNPJ, T0, "BAIXADA")
+
+        assert observacao_mais_nova(con, CNPJ)["situacao"] == "BAIXADA"
+
+    def test_ignora_outros_cnpjs(self, con: sqlite3.Connection) -> None:
+        self._gravar(con, OUTRO_CNPJ, T2, "BAIXADA")
+
+        assert observacao_mais_nova(con, CNPJ) is None
 
 
 class TestAtualizarUltimaConsulta:

@@ -61,6 +61,24 @@ class TestOverridePorAmbiente:
         assert isinstance(settings.cache_ttl_horas, int)
 
 
+class TestCaminhoDoBanco:
+    @pytest.mark.parametrize(
+        ("url", "caminho"),
+        [
+            ("sqlite:///./dados/consulta_cnpj.db", "./dados/consulta_cnpj.db"),
+            ("sqlite:////var/dados/consulta.db", "/var/dados/consulta.db"),
+        ],
+        ids=["relativo", "absoluto"],
+    )
+    def test_tira_o_prefixo_da_url(
+        self, monkeypatch: pytest.MonkeyPatch, url: str, caminho: str
+    ) -> None:
+        # `sqlite3.connect` recebe caminho de arquivo, não URL
+        monkeypatch.setenv("DATABASE_URL", url)
+
+        assert _settings_sem_env_file().caminho_banco == caminho
+
+
 class TestValidacao:
     def test_cache_ttl_nao_positivo_levanta_validation_error(
         self, monkeypatch: pytest.MonkeyPatch
