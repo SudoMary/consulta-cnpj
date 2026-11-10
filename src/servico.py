@@ -102,6 +102,27 @@ def consultar(
     return Consulta(nova, coleta.fonte, 0)  # type: ignore[arg-type]
 
 
+def acompanhar(
+    cnpj_digitado: str,
+    *,
+    motor: Engine,
+    coletar: Callable[[str], Coleta],
+    ttl_horas: int,
+    agora: datetime | None = None,
+) -> Consulta:
+    """Inclui a empresa na recoleta diária e devolve a consulta feita antes.
+
+    Consulta primeiro para só acompanhar empresa que existe: CNPJ inválido ou
+    não encontrado sobe como na consulta comum, sem marcar nada.
+    """
+    consulta = consultar(
+        cnpj_digitado, motor=motor, coletar=coletar, ttl_horas=ttl_horas, agora=agora
+    )
+    with motor.begin() as con:
+        repo.marcar_acompanhamento(con, consulta.observacao["cnpj"], acompanhando=True)
+    return consulta
+
+
 def mudancas(motor: Engine, cnpj: str) -> list[dict[str, Any]]:
     """Compara observações consecutivas e lista o que mudou nos campos vigiados."""
     with motor.connect() as con:

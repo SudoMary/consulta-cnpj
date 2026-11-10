@@ -1,9 +1,9 @@
 """Testes das regras do serviço: cache, degradação e detecção de mudança.
 
-`coletar` é falso: conta as chamadas e segue um roteiro, então cada teste prova
-quantas vezes a rede teria sido usada, sem tocar nela. O banco roda no SQLite
-e, com `TEST_DATABASE_URL` definida, também no PostgreSQL. O relógio é passado
-como argumento.
+`coletar` é falso (ver `tests/falsos.py`): conta as chamadas e segue um
+roteiro, então cada teste prova quantas vezes a rede teria sido usada, sem
+tocar nela. O banco roda no SQLite e, com `TEST_DATABASE_URL` definida, também
+no PostgreSQL. O relógio é passado como argumento.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, text
 
-from src.cliente import CnpjNaoEncontrado, Coleta, ErroDeFonte, TodasAsFontesFalharam
+from src.cliente import CnpjNaoEncontrado, ErroDeFonte, TodasAsFontesFalharam
 from src.db import criar_motor
 from src.repo import (
     empresa_por_cnpj,
@@ -27,43 +27,17 @@ from src.servico import (
     ORIGEM_CACHE_VENCIDO,
     Consulta,
     RegraDeNegocio,
+    acompanhar,
     consultar,
     mudancas,
 )
+from tests.falsos import ColetaFalsa, coleta
 
 CNPJ = "11222333000181"
 TTL_HORAS = 24
 AGORA = datetime(2026, 11, 6, 12, 0, 0, tzinfo=UTC)
 AGORA_TEXTO = "2026-11-06 12:00:00"
 ERRO_500 = ErroDeFonte("brasilapi", "HTTP 500")
-
-
-class ColetaFalsa:
-    """Faz o papel de `consultar_externo`: conta as chamadas e segue um roteiro.
-
-    Uma chamada além do roteiro estoura `IndexError` e reprova o teste.
-    """
-
-    def __init__(self, *passos: Coleta | Exception) -> None:
-        self.passos = list(passos)
-        self.chamadas = 0
-
-    def __call__(self, cnpj: str) -> Coleta:
-        self.chamadas += 1
-        passo = self.passos.pop(0)
-        if isinstance(passo, Exception):
-            raise passo
-        return passo
-
-
-def _coleta(
-    situacao: str = "ATIVA",
-    *,
-    fonte: str = "brasilapi",
-    erros: tuple[ErroDeFonte, ...] = (),
-) -> Coleta:
-    dados = {"razao_social": "ACME LTDA", "situacao": situacao}
-    return Coleta(dados=dados, fonte=fonte, bruto_json='{"bruto": true}', erros=erros)
 
 
 def _consultar(
@@ -118,7 +92,7 @@ class TestValidacaoAntesDaRede:
         assert coletar.chamadas == 0
 
     def test_aceita_cnpj_com_mascara(self, motor: Engine) -> None:
-        consulta = _consultar(motor, ColetaFalsa(_coleta()), cnpj="11.222.333/0001-81")
+        consulta = _consultar(motor, ColetaFalsa(coleta()), cnpj="11.222.333/0001-81")
 
         assert consulta.observacao["cnpj"] == CNPJ
 
@@ -126,7 +100,7 @@ class TestValidacaoAntesDaRede:
 class TestPrimeiraConsulta:
     def test_grava_empresa_e_observacao(self, motor: Engine) -> None:
         # Act
-        consulta = _consultar(motor, ColetaFalsa(_coleta()))
+        consulta = _consultar(motor, ColetaFalsa(coleta()))
 
         # Assert
         assert consulta.origem == "brasilapi"
@@ -137,7 +111,7 @@ class TestPrimeiraConsulta:
         assert _empresa(motor)["primeira_consulta"] == AGORA_TEXTO
 
     def test_origem_diz_qual_fonte_respondeu(self, motor: Engine) -> None:
-        consulta = _consultar(motor, ColetaFalsa(_coleta(fonte="minhareceita")))
+        consulta = _consultar(motor, ColetaFalsa(coleta(fonte="minhareceita")))
 
         assert consulta.origem == "minhareceita"
         assert consulta.observacao["fonte"] == "minhareceita"
@@ -145,7 +119,7 @@ class TestPrimeiraConsulta:
     def test_gravacao_fica_no_banco_depois_de_fechar(self, url_banco: str) -> None:
         # Sem commit, tudo sumiria ao encerrar a conexão.
         motor = criar_motor(url_banco)
-        _consultar(motor, ColetaFalsa(_coleta()))
+        _consultar(motor, ColetaFalsa(coleta()))
         motor.dispose()
 
         outro = criar_motor(url_banco)
@@ -158,7 +132,7 @@ class TestPrimeiraConsulta:
 class TestCache:
     def test_duas_consultas_seguidas_fazem_uma_chamada(self, motor: Engine) -> None:
         # Arrange
-        coletar = ColetaFalsa(_coleta())
+        coletar = ColetaFalsa(coleta())
         _consultar(motor, coletar)
 
         # Act
@@ -171,7 +145,7 @@ class TestCache:
         assert len(_observacoes(motor)) == 1
 
     def test_cache_vencido_chama_de_novo_e_acrescenta_observacao(self, motor: Engine) -> None:
-        coletar = ColetaFalsa(_coleta(), _coleta())
+        coletar = ColetaFalsa(coleta(), coleta())
         _consultar(motor, coletar)
 
         depois = _consultar(motor, coletar, agora=AGORA + timedelta(hours=TTL_HORAS))
@@ -181,7 +155,7 @@ class TestCache:
         assert len(_observacoes(motor)) == 2
 
     def test_forcar_ignora_o_cache(self, motor: Engine) -> None:
-        coletar = ColetaFalsa(_coleta(), _coleta())
+        coletar = ColetaFalsa(coleta(), coleta())
         _consultar(motor, coletar)
 
         depois = _consultar(motor, coletar, agora=AGORA + timedelta(minutes=1), forcar=True)
@@ -192,7 +166,7 @@ class TestCache:
     def test_nova_coleta_atualiza_ultima_consulta_e_preserva_a_primeira(
         self, motor: Engine
     ) -> None:
-        coletar = ColetaFalsa(_coleta(), _coleta())
+        coletar = ColetaFalsa(coleta(), coleta())
         _consultar(motor, coletar)
 
         _consultar(motor, coletar, agora=AGORA + timedelta(days=2))
@@ -205,7 +179,7 @@ class TestCache:
 class TestDegradacao:
     def test_fontes_fora_com_observacao_antiga_devolve_a_antiga(self, motor: Engine) -> None:
         # Arrange
-        coletar = ColetaFalsa(_coleta(), TodasAsFontesFalharam([ERRO_500]))
+        coletar = ColetaFalsa(coleta(), TodasAsFontesFalharam([ERRO_500]))
         _consultar(motor, coletar)
 
         # Act
@@ -219,7 +193,7 @@ class TestDegradacao:
 
     def test_degradacao_registra_cada_falha(self, motor: Engine) -> None:
         erros = [ERRO_500, ErroDeFonte("minhareceita", "timeout")]
-        coletar = ColetaFalsa(_coleta(), TodasAsFontesFalharam(erros))
+        coletar = ColetaFalsa(coleta(), TodasAsFontesFalharam(erros))
         _consultar(motor, coletar)
 
         _consultar(motor, coletar, agora=AGORA + timedelta(days=3))
@@ -244,9 +218,9 @@ class TestDegradacao:
             outro.dispose()
 
     def test_falha_da_primaria_e_registrada_quando_a_reserva_resolve(self, motor: Engine) -> None:
-        coleta = _coleta(fonte="minhareceita", erros=(ERRO_500,))
+        da_reserva = coleta(fonte="minhareceita", erros=(ERRO_500,))
 
-        _consultar(motor, ColetaFalsa(coleta))
+        _consultar(motor, ColetaFalsa(da_reserva))
 
         assert _falhas(motor) == [(CNPJ, AGORA_TEXTO, "brasilapi", "HTTP 500")]
 
@@ -327,3 +301,29 @@ class TestMudancas:
             ("ATIVA", "SUSPENSA"),
             ("SUSPENSA", "BAIXADA"),
         ]
+
+
+class TestAcompanhar:
+    def test_consulta_e_marca_para_a_coleta_diaria(self, motor: Engine) -> None:
+        coletar = ColetaFalsa(coleta())
+
+        consulta = acompanhar(
+            "11.222.333/0001-81", motor=motor, coletar=coletar, ttl_horas=TTL_HORAS, agora=AGORA
+        )
+
+        assert consulta.observacao["cnpj"] == CNPJ
+        assert _empresa(motor)["acompanhando"] == 1
+
+    def test_cnpj_invalido_nao_marca_nada(self, motor: Engine) -> None:
+        with pytest.raises(RegraDeNegocio):
+            acompanhar("11222333000182", motor=motor, coletar=ColetaFalsa(), ttl_horas=TTL_HORAS)
+
+        assert _empresa(motor) is None
+
+    def test_cnpj_inexistente_nao_marca_nada(self, motor: Engine) -> None:
+        coletar = ColetaFalsa(CnpjNaoEncontrado(CNPJ))
+
+        with pytest.raises(CnpjNaoEncontrado):
+            acompanhar(CNPJ, motor=motor, coletar=coletar, ttl_horas=TTL_HORAS, agora=AGORA)
+
+        assert _empresa(motor) is None
