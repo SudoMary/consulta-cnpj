@@ -36,6 +36,7 @@ ruff check . && ruff format --check .      # lint
 - **Duas fontes com fallback.** BrasilAPI como primária, Minha Receita como reserva. API pública cai; sem plano B o sistema cai junto.
 - **Timeout + backoff + degradação.** Toda chamada externa tem timeout; erro de rede é tentado de novo com espera crescente; se tudo falhar e houver dado antigo, entrega o antigo com aviso em vez de tela de erro.
 - **Coleta agendada no GitHub Actions.** Hospedagem gratuita hiberna; cron dentro dela não dispara. O histórico de execuções fica visível na aba Actions do repositório.
+- **SQLite no desenvolvimento, PostgreSQL em produção.** A hospedagem gratuita apaga os arquivos locais ao hibernar, então o banco de produção fica no Supabase. O mesmo SQL roda nos dois: os testes passam sem conexão no SQLite, e o CI roda os testes de banco também num PostgreSQL de verdade.
 
 ## Limitações conhecidas (v1)
 
