@@ -14,7 +14,7 @@ Consultar é fácil — existe API pública para isso. O que não existe pronto 
 
 ## Como rodar
 
-**Estado:** Entrega 2 concluída: consulta, histórico e detecção de mudança pela linha de comando. A tela web e a coleta agendada chegam na Entrega 3.
+**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, pela linha de comando. A tela web chega no fim da Entrega 3.
 
 ```bash
 python -m venv .venv
@@ -24,6 +24,8 @@ pip install -r requirements-dev.txt
 
 python -m src.cli consultar 11.222.333/0001-81             # usa o cache de 24 horas
 python -m src.cli consultar 11.222.333/0001-81 --forcar    # ignora o cache
+python -m src.cli acompanhar 11.222.333/0001-81            # entra na coleta diária
+python -m src.coletor                                      # roda a coleta diária
 
 pytest -q                                  # testes
 ruff check . && ruff format --check .      # lint
@@ -35,7 +37,7 @@ ruff check . && ruff format --check .      # lint
 - **Cache de 24 horas.** Dado cadastral não muda de hora em hora; sem cache cada F5 vira chamada externa e a API pública corta por rate limit.
 - **Duas fontes com fallback.** BrasilAPI como primária, Minha Receita como reserva. API pública cai; sem plano B o sistema cai junto.
 - **Timeout + backoff + degradação.** Toda chamada externa tem timeout; erro de rede é tentado de novo com espera crescente; se tudo falhar e houver dado antigo, entrega o antigo com aviso em vez de tela de erro.
-- **Coleta agendada no GitHub Actions.** Hospedagem gratuita hiberna; cron dentro dela não dispara. O histórico de execuções fica visível na aba Actions do repositório.
+- **Coleta agendada no GitHub Actions.** Hospedagem gratuita hiberna; cron dentro dela não dispara. O histórico de execuções fica visível na aba Actions do repositório. A coleta é idempotente por dia: rodar duas vezes no mesmo dia não duplica observação. Para acompanhar uma empresa em produção: aba Actions → coleta → Run workflow, informando o CNPJ.
 - **SQLite no desenvolvimento, PostgreSQL em produção.** A hospedagem gratuita apaga os arquivos locais ao hibernar, então o banco de produção fica no Supabase. O mesmo SQL roda nos dois: os testes passam sem conexão no SQLite, e o CI roda os testes de banco também num PostgreSQL de verdade.
 
 ## Limitações conhecidas (v1)
@@ -43,7 +45,8 @@ ruff check . && ruff format --check .      # lint
 - Sem autenticação de usuário.
 - Sem consulta em lote.
 - Sem integração com Portal da Transparência.
-- Hospedagem gratuita hiberna: a primeira visita depois de um tempo ocioso pode levar ~30s (cold start).
+- Hospedagem gratuita hiberna: a primeira visita depois de um tempo ocioso pode levar cerca de 1 minuto (cold start).
+- Em repositório público, o GitHub desativa agendamentos depois de 60 dias sem atividade no repositório. Se isso acontecer, a coleta diária precisa ser reativada na aba Actions.
 
 ## Licença
 
