@@ -14,8 +14,8 @@ from typing import Any
 
 import httpx
 import pytest
+from sqlalchemy import Engine
 
-from src.db import conectar
 from src.fontes import brasilapi, minhareceita
 from src.repo import inserir_empresa_se_nao_existe, inserir_observacao, observacoes_por_cnpj
 
@@ -122,14 +122,13 @@ class TestNormalizar:
 
 class TestGravacao:
     def test_saida_do_adapter_grava_e_volta_igual(
-        self, fonte: ModuleType, exemplo: dict[str, Any]
+        self, fonte: ModuleType, exemplo: dict[str, Any], motor: Engine
     ) -> None:
         # Arrange
         dados = fonte.normalizar(exemplo)
-        con = conectar(":memory:")
 
-        try:
-            # Act: `NOME` precisa passar no CHECK de `observacao.fonte`
+        # Act: `NOME` precisa passar no CHECK de `observacao.fonte`
+        with motor.begin() as con:
             inserir_empresa_se_nao_existe(con, CNPJ, QUANDO)
             inserir_observacao(
                 con,
@@ -140,8 +139,6 @@ class TestGravacao:
                 bruto_json=json.dumps(exemplo),
             )
             [observacao] = observacoes_por_cnpj(con, CNPJ)
-        finally:
-            con.close()
 
         # Assert: toda chave do adapter existe como coluna, com o mesmo valor
         assert observacao["fonte"] == fonte.NOME

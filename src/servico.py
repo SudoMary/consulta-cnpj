@@ -1,20 +1,22 @@
 """Regras do negócio: cache, gravação append-only e detecção de mudança.
 
-Recebe de fora quem coleta (`coletar`) e o relógio (`agora`), então as regras
-testam sem rede e sem esperar o tempo passar. É aqui que vive a transação: o
-`repo.py` não faz commit, e cada conjunto de gravações entra inteiro ou não entra.
+Recebe de fora o banco (`motor`), quem coleta (`coletar`) e o relógio (`agora`),
+então as regras testam sem rede e sem esperar o tempo passar. É aqui que vive a
+transação: o `repo.py` não faz commit, e cada conjunto de gravações entra
+inteiro ou não entra.
 
 Datas são gravadas em UTC, no formato 'YYYY-MM-DD HH:MM:SS' do schema.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import pairwise
 from typing import Any
+
+from sqlalchemy import Connection, Engine
 
 from . import repo
 from .cliente import Coleta, ErroDeFonte, TodasAsFontesFalharam
@@ -58,7 +60,7 @@ class Consulta:
 def consultar(
     cnpj_digitado: str,
     *,
-    con: sqlite3.Connection,
+    motor: Engine,
     coletar: Callable[[str], Coleta],
     ttl_horas: int,
     forcar: bool = False,
@@ -75,7 +77,8 @@ def consultar(
 
     cnpj = so_digitos(cnpj_digitado)
     agora = agora or datetime.now(UTC)
-    recente = repo.observacao_mais_nova(con, cnpj)
+    with motor.connect() as con:
+        recente = repo.observacao_mais_nova(con, cnpj)
 
     if recente is not None and not forcar:
         idade = _idade_horas(recente, agora)
@@ -85,23 +88,27 @@ def consultar(
     try:
         coleta = coletar(cnpj)
     except TodasAsFontesFalharam as falha:
-        with con:
+        with motor.begin() as con:
             _registrar_falhas(con, cnpj, falha.erros, agora)
         if recente is None:
             raise
         return Consulta(recente, ORIGEM_CACHE_VENCIDO, _idade_horas(recente, agora))
 
-    with con:
+    with motor.begin() as con:
         _registrar_falhas(con, cnpj, coleta.erros, agora)
         _gravar_observacao(con, cnpj, coleta, agora)
+        nova = repo.observacao_mais_nova(con, cnpj)
 
-    return Consulta(repo.observacao_mais_nova(con, cnpj), coleta.fonte, 0)  # type: ignore[arg-type]
+    return Consulta(nova, coleta.fonte, 0)  # type: ignore[arg-type]
 
 
-def mudancas(con: sqlite3.Connection, cnpj: str) -> list[dict[str, Any]]:
+def mudancas(motor: Engine, cnpj: str) -> list[dict[str, Any]]:
     """Compara observações consecutivas e lista o que mudou nos campos vigiados."""
+    with motor.connect() as con:
+        observacoes = repo.observacoes_por_cnpj(con, cnpj)
+
     lista: list[dict[str, Any]] = []
-    for antes, depois in pairwise(repo.observacoes_por_cnpj(con, cnpj)):
+    for antes, depois in pairwise(observacoes):
         for campo in CAMPOS_VIGIADOS:
             if antes[campo] != depois[campo]:
                 lista.append(
@@ -115,7 +122,7 @@ def mudancas(con: sqlite3.Connection, cnpj: str) -> list[dict[str, Any]]:
     return lista
 
 
-def _gravar_observacao(con: sqlite3.Connection, cnpj: str, coleta: Coleta, agora: datetime) -> None:
+def _gravar_observacao(con: Connection, cnpj: str, coleta: Coleta, agora: datetime) -> None:
     carimbo = _carimbo(agora)
     repo.inserir_empresa_se_nao_existe(con, cnpj, carimbo)
     repo.inserir_observacao(
@@ -130,7 +137,7 @@ def _gravar_observacao(con: sqlite3.Connection, cnpj: str, coleta: Coleta, agora
 
 
 def _registrar_falhas(
-    con: sqlite3.Connection, cnpj: str, erros: Iterable[ErroDeFonte], agora: datetime
+    con: Connection, cnpj: str, erros: Iterable[ErroDeFonte], agora: datetime
 ) -> None:
     carimbo = _carimbo(agora)
     for erro in erros:

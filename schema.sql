@@ -1,18 +1,20 @@
 -- Esquema do banco do Projeto A: Consulta de CNPJ com histórico.
 --
--- Aplicado na primeira conexão (ver src/db.py). Todas as tabelas e indices
--- usam IF NOT EXISTS: rodar duas vezes no mesmo banco tem o mesmo efeito
--- que rodar uma. Isso e o que chamamos de idempotente.
+-- Aplicado ao abrir o banco (ver src/db.py). Roda igual no SQLite
+-- (desenvolvimento e testes) e no PostgreSQL (producao). A unica diferenca,
+-- o tipo da coluna `id`, e preenchida por src/db.py.
 --
--- PRAGMA foreign_keys = ON deve ser aplicado em TODA conexao (o SQLite
+-- Todas as tabelas e indices usam IF NOT EXISTS: rodar duas vezes no mesmo
+-- banco tem o mesmo efeito que rodar uma. Isso e o que chamamos de idempotente.
+--
+-- PRAGMA foreign_keys = ON deve ser aplicado em TODA conexao do SQLite (ele
 -- ignora FK por padrao). Fica em src/db.py, nao aqui.
 
 -- ---------------------------------------------------------------------
 -- empresa: cada CNPJ consultado ao menos uma vez.
 --
 -- NAO tem coluna `situacao` de proposito: a situacao atual e estado
--- derivado da observacao mais recente (decisao append-only em
--- vault/Decisoes/Consultas append-only.md).
+-- derivado da observacao mais recente (append-only).
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS empresa (
     -- 14 digitos, sem mascara. TEXT e nao INTEGER: CNPJ pode comecar com 0.
@@ -32,7 +34,7 @@ CREATE TABLE IF NOT EXISTS empresa (
 -- responder "mudou quando".
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS observacao (
-    id               INTEGER PRIMARY KEY,
+    id               CHAVE_SUBSTITUTA,
     cnpj             TEXT    NOT NULL REFERENCES empresa(cnpj),
     coletado_em      TEXT    NOT NULL,             -- ISO 'YYYY-MM-DD HH:MM:SS'
     fonte            TEXT    NOT NULL CHECK (fonte IN ('brasilapi', 'minhareceita')),
@@ -47,7 +49,9 @@ CREATE TABLE IF NOT EXISTS observacao (
     cnae_descricao   TEXT,
     municipio        TEXT,
     uf               TEXT,
-    capital_centavos INTEGER,                      -- dinheiro em centavos, nunca float
+    -- Dinheiro em centavos, nunca float. BIGINT: o capital da Petrobras em
+    -- centavos nao cabe no INTEGER de 32 bits do PostgreSQL.
+    capital_centavos BIGINT,
     qtd_socios       INTEGER,
 
     -- A resposta inteira como veio da fonte. E o que salva o retrabalho
@@ -66,7 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_obs_cnpj ON observacao(cnpj, coletado_em);
 -- registro bem-sucedido).
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS falha_coleta (
-    id          INTEGER PRIMARY KEY,
+    id          CHAVE_SUBSTITUTA,
     cnpj        TEXT NOT NULL,
     ocorrido_em TEXT NOT NULL,                     -- ISO 'YYYY-MM-DD HH:MM:SS'
     fonte       TEXT NOT NULL,

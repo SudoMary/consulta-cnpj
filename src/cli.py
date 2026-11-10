@@ -16,7 +16,7 @@ import httpx
 
 from .cliente import CnpjNaoEncontrado, TodasAsFontesFalharam, consultar_externo
 from .config import Settings
-from .db import conectar
+from .db import criar_motor
 from .servico import (
     ORIGEM_CACHE,
     ORIGEM_CACHE_VENCIDO,
@@ -39,19 +39,19 @@ def main(
     """
     args = _interpretar(argumentos)
     config = Settings()
-    con = conectar(config.caminho_banco)
+    motor = criar_motor(config.url_banco)
     try:
         with httpx.Client(transport=transporte) as http:
             consulta = consultar(
                 args.cnpj,
-                con=con,
+                motor=motor,
                 coletar=partial(consultar_externo, http=http, config=config),
                 ttl_horas=config.cache_ttl_horas,
                 forcar=args.forcar,
             )
         print(formatar_ficha(consulta))
         print()
-        print(formatar_mudancas(mudancas(con, consulta.observacao["cnpj"])))
+        print(formatar_mudancas(mudancas(motor, consulta.observacao["cnpj"])))
     except RegraDeNegocio as erro:
         return _falhar(str(erro))
     except CnpjNaoEncontrado:
@@ -62,7 +62,7 @@ def main(
             "Tente de novo mais tarde."
         )
     finally:
-        con.close()
+        motor.dispose()
     return 0
 
 
