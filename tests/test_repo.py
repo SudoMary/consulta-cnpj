@@ -14,9 +14,11 @@ from sqlalchemy import Connection, Engine, text
 
 from src.repo import (
     atualizar_ultima_consulta,
+    cnpjs_acompanhados,
     empresa_por_cnpj,
     inserir_empresa_se_nao_existe,
     inserir_observacao,
+    marcar_acompanhamento,
     observacao_mais_nova,
     observacoes_por_cnpj,
     registrar_falha,
@@ -243,3 +245,33 @@ class TestEmpresaPorCnpj:
         assert resultado is not None
         assert resultado["cnpj"] == CNPJ
         assert resultado["acompanhando"] == 0
+
+
+class TestAcompanhamento:
+    def test_empresa_nova_nao_e_acompanhada(self, con: Connection) -> None:
+        inserir_empresa_se_nao_existe(con, CNPJ, T0)
+
+        assert cnpjs_acompanhados(con) == []
+
+    def test_marcar_inclui_so_a_empresa_marcada(self, con: Connection) -> None:
+        inserir_empresa_se_nao_existe(con, CNPJ, T0)
+        inserir_empresa_se_nao_existe(con, OUTRO_CNPJ, T0)
+
+        marcar_acompanhamento(con, OUTRO_CNPJ, acompanhando=True)
+
+        assert cnpjs_acompanhados(con) == [OUTRO_CNPJ]
+
+    def test_desmarcar_tira_da_lista(self, con: Connection) -> None:
+        inserir_empresa_se_nao_existe(con, CNPJ, T0)
+        marcar_acompanhamento(con, CNPJ, acompanhando=True)
+
+        marcar_acompanhamento(con, CNPJ, acompanhando=False)
+
+        assert cnpjs_acompanhados(con) == []
+
+    def test_lista_sai_em_ordem_de_cnpj(self, con: Connection) -> None:
+        for cnpj in (OUTRO_CNPJ, CNPJ):
+            inserir_empresa_se_nao_existe(con, cnpj, T0)
+            marcar_acompanhamento(con, cnpj, acompanhando=True)
+
+        assert cnpjs_acompanhados(con) == [CNPJ, OUTRO_CNPJ]
