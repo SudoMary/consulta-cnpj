@@ -1,116 +1,103 @@
-"""Testes da camada de conexão com SQLite (src/db.py).
+"""Testes da conexão e do schema (src/db.py).
 
-Todos usam `:memory:` quando possível, exceto o teste de idempotência de
-schema, que precisa de arquivo em disco (`tmp_path`, fornecido pelo pytest).
+Rodam no SQLite e, com `TEST_DATABASE_URL` definida, também no PostgreSQL:
+o mesmo schema e as mesmas restrições precisam valer nos dois bancos.
 """
 
 from __future__ import annotations
 
-import sqlite3
+from pathlib import Path
+from typing import Any
 
 import pytest
+from sqlalchemy import Connection, Engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 
-from src.db import conectar
+from src.db import criar_motor
+
+CNPJ = "11222333000181"
+QUANDO = "2026-01-01 00:00:00"
 
 
-class TestConectar:
-    def test_aplica_schema_em_memoria(self) -> None:
-        # Act
-        con = conectar(":memory:")
+def _inserir_empresa(con: Connection, cnpj: str = CNPJ) -> None:
+    con.execute(
+        text(
+            "INSERT INTO empresa (cnpj, primeira_consulta, ultima_consulta) "
+            "VALUES (:cnpj, :quando, :quando)"
+        ),
+        {"cnpj": cnpj, "quando": QUANDO},
+    )
 
+
+def _inserir_observacao(con: Connection, **campos: Any) -> None:
+    valores = {"cnpj": CNPJ, "coletado_em": QUANDO, "fonte": "brasilapi", "bruto_json": "{}"}
+    valores.update(campos)
+    colunas = ", ".join(valores)
+    marcadores = ", ".join(f":{coluna}" for coluna in valores)
+    con.execute(text(f"INSERT INTO observacao ({colunas}) VALUES ({marcadores})"), valores)
+
+
+class TestCriarMotor:
+    def test_aplica_o_schema(self, motor: Engine) -> None:
+        tabelas = set(inspect(motor).get_table_names())
+
+        assert {"empresa", "observacao", "falha_coleta"} <= tabelas
+
+    def test_aplicar_duas_vezes_e_idempotente(self, url_banco: str) -> None:
+        # Act: aplica o schema duas vezes no mesmo banco
+        criar_motor(url_banco).dispose()
+        motor = criar_motor(url_banco)
+
+        # Assert: banco vazio, schema reaplicado sem erro
         try:
-            # Assert
-            tabelas = {
-                row["name"]
-                for row in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-            }
-            assert {"empresa", "observacao", "falha_coleta"} <= tabelas
+            with motor.connect() as con:
+                assert con.execute(text("SELECT COUNT(*) FROM empresa")).scalar_one() == 0
         finally:
-            con.close()
+            motor.dispose()
 
-    def test_foreign_keys_ligadas(self) -> None:
-        con = conectar(":memory:")
+    def test_id_e_gerado_pelo_banco(self, motor: Engine) -> None:
+        with motor.begin() as con:
+            _inserir_empresa(con)
+            _inserir_observacao(con)
+            _inserir_observacao(con)
+            ids = con.execute(text("SELECT id FROM observacao ORDER BY id")).scalars().all()
 
+        assert len(set(ids)) == 2
+        assert all(ids)
+
+    def test_sqlite_liga_as_chaves_estrangeiras(self, tmp_path: Path) -> None:
+        # O SQLite ignora FK por padrão; o PostgreSQL já as respeita.
+        motor = criar_motor(f"sqlite:///{(tmp_path / 'fk.db').as_posix()}")
         try:
-            assert con.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+            with motor.connect() as con:
+                assert con.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
         finally:
-            con.close()
-
-    def test_row_factory_permite_acesso_por_nome(self) -> None:
-        con = conectar(":memory:")
-
-        try:
-            con.execute(
-                "INSERT INTO empresa (cnpj, primeira_consulta, ultima_consulta) VALUES (?, ?, ?)",
-                ("11222333000181", "2026-01-01 00:00:00", "2026-01-01 00:00:00"),
-            )
-            row = con.execute(
-                "SELECT cnpj FROM empresa WHERE cnpj = ?", ("11222333000181",)
-            ).fetchone()
-
-            assert row["cnpj"] == "11222333000181"
-        finally:
-            con.close()
-
-    def test_conectar_duas_vezes_no_mesmo_arquivo_e_idempotente(
-        self, tmp_path: pytest.TempPathFactory
-    ) -> None:
-        # Arrange
-        caminho = tmp_path / "teste.db"
-
-        # Act: aplica o schema duas vezes no mesmo arquivo
-        con1 = conectar(str(caminho))
-        con1.close()
-        con2 = conectar(str(caminho))
-
-        try:
-            # Assert: banco vazio (schema reaplicado sem erro)
-            assert con2.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0
-        finally:
-            con2.close()
+            motor.dispose()
 
 
 class TestRestricoes:
-    def test_fk_violation_estoura_em_observacao_sem_empresa(self) -> None:
-        con = conectar(":memory:")
+    def test_observacao_sem_empresa_e_recusada(self, motor: Engine) -> None:
+        with pytest.raises(IntegrityError), motor.begin() as con:
+            _inserir_observacao(con)
 
-        try:
-            with pytest.raises(sqlite3.IntegrityError):
-                con.execute(
-                    "INSERT INTO observacao (cnpj, coletado_em, fonte, bruto_json) "
-                    "VALUES (?, ?, ?, ?)",
-                    ("11222333000181", "2026-01-01 00:00:00", "brasilapi", "{}"),
-                )
-        finally:
-            con.close()
+    def test_fonte_fora_da_lista_e_recusada(self, motor: Engine) -> None:
+        with motor.begin() as con:
+            _inserir_empresa(con)
 
-    def test_check_fonte_invalida_estoura(self) -> None:
-        con = conectar(":memory:")
+        with pytest.raises(IntegrityError), motor.begin() as con:
+            _inserir_observacao(con, fonte="outra")
 
-        try:
-            con.execute(
-                "INSERT INTO empresa (cnpj, primeira_consulta, ultima_consulta) VALUES (?, ?, ?)",
-                ("11222333000181", "2026-01-01 00:00:00", "2026-01-01 00:00:00"),
-            )
+    def test_cnpj_com_tamanho_errado_e_recusado(self, motor: Engine) -> None:
+        with pytest.raises(IntegrityError), motor.begin() as con:
+            _inserir_empresa(con, cnpj="123")
 
-            with pytest.raises(sqlite3.IntegrityError):
-                con.execute(
-                    "INSERT INTO observacao (cnpj, coletado_em, fonte, bruto_json) "
-                    "VALUES (?, ?, ?, ?)",
-                    ("11222333000181", "2026-01-01 00:00:00", "outra", "{}"),
-                )
-        finally:
-            con.close()
+    def test_capital_da_petrobras_cabe_na_coluna(self, motor: Engine) -> None:
+        # R$ 205.431.960.000,00 são 20.543.196.000.000 centavos: não cabe no
+        # INTEGER de 32 bits do PostgreSQL, por isso a coluna é BIGINT.
+        centavos = 20_543_196_000_000
+        with motor.begin() as con:
+            _inserir_empresa(con)
+            _inserir_observacao(con, capital_centavos=centavos)
+            gravado = con.execute(text("SELECT capital_centavos FROM observacao")).scalar_one()
 
-    def test_check_cnpj_tamanho_invalido_estoura(self) -> None:
-        con = conectar(":memory:")
-
-        try:
-            with pytest.raises(sqlite3.IntegrityError):
-                con.execute(
-                    "INSERT INTO empresa (cnpj, primeira_consulta, ultima_consulta) "
-                    "VALUES (?, ?, ?)",
-                    ("123", "2026-01-01 00:00:00", "2026-01-01 00:00:00"),
-                )
-        finally:
-            con.close()
+        assert gravado == centavos

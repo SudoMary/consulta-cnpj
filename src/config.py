@@ -27,9 +27,17 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./dados/consulta_cnpj.db"
 
     @property
-    def caminho_banco(self) -> str:
-        """Caminho do arquivo SQLite, que é o que `conectar` recebe."""
-        return self.database_url.removeprefix("sqlite:///")
+    def url_banco(self) -> str:
+        """URL do banco no formato do SQLAlchemy, com o driver instalado.
+
+        O Supabase entrega ``postgresql://...``; sem o ``+psycopg``, o
+        SQLAlchemy procuraria o driver antigo (psycopg2), que não está
+        instalado. SQLite passa sem mudança.
+        """
+        for prefixo in ("postgresql://", "postgres://"):
+            if self.database_url.startswith(prefixo):
+                return "postgresql+psycopg://" + self.database_url.removeprefix(prefixo)
+        return self.database_url
 
 
 @lru_cache

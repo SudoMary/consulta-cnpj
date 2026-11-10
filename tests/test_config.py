@@ -61,22 +61,28 @@ class TestOverridePorAmbiente:
         assert isinstance(settings.cache_ttl_horas, int)
 
 
-class TestCaminhoDoBanco:
+class TestUrlDoBanco:
     @pytest.mark.parametrize(
-        ("url", "caminho"),
+        ("url", "esperada"),
         [
-            ("sqlite:///./dados/consulta_cnpj.db", "./dados/consulta_cnpj.db"),
-            ("sqlite:////var/dados/consulta.db", "/var/dados/consulta.db"),
+            ("sqlite:///./dados/consulta_cnpj.db", "sqlite:///./dados/consulta_cnpj.db"),
+            ("postgresql://u:s@host:5432/postgres", "postgresql+psycopg://u:s@host:5432/postgres"),
+            ("postgres://u:s@host:5432/postgres", "postgresql+psycopg://u:s@host:5432/postgres"),
+            (
+                "postgresql+psycopg://u:s@host:5432/postgres",
+                "postgresql+psycopg://u:s@host:5432/postgres",
+            ),
         ],
-        ids=["relativo", "absoluto"],
+        ids=["sqlite", "supabase", "forma-curta", "ja-com-driver"],
     )
-    def test_tira_o_prefixo_da_url(
-        self, monkeypatch: pytest.MonkeyPatch, url: str, caminho: str
+    def test_aponta_o_driver_instalado(
+        self, monkeypatch: pytest.MonkeyPatch, url: str, esperada: str
     ) -> None:
-        # `sqlite3.connect` recebe caminho de arquivo, não URL
+        # O Supabase entrega `postgresql://`; sem `+psycopg`, o SQLAlchemy
+        # procuraria o psycopg2, que não está instalado.
         monkeypatch.setenv("DATABASE_URL", url)
 
-        assert _settings_sem_env_file().caminho_banco == caminho
+        assert _settings_sem_env_file().url_banco == esperada
 
 
 class TestValidacao:

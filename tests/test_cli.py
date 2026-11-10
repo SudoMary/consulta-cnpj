@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from src.cli import descrever_origem, formatar_capital, formatar_mudancas, main
-from src.db import conectar
+from src.db import criar_motor
 from src.repo import inserir_empresa_se_nao_existe, inserir_observacao
 from src.servico import ORIGEM_CACHE, ORIGEM_CACHE_VENCIDO, Consulta
 
@@ -38,8 +38,8 @@ class Rede:
 @pytest.fixture
 def banco(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     """Aponta a configuração para um banco temporário e fontes fictícias."""
-    caminho = str(tmp_path / "cli.db")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{caminho}")
+    caminho = f"sqlite:///{(tmp_path / 'cli.db').as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", caminho)
     monkeypatch.setenv("BRASILAPI_BASE_URL", "https://primaria.exemplo/api")
     monkeypatch.setenv("MINHARECEITA_BASE_URL", "https://reserva.exemplo")
     return caminho
@@ -54,10 +54,10 @@ def _rodar(rede: Rede, *argumentos: str) -> int:
     return main(["consultar", *argumentos], transporte=httpx.MockTransport(rede))
 
 
-def _gravar_observacao_antiga(caminho: str, **dados: Any) -> None:
-    con = conectar(caminho)
+def _gravar_observacao_antiga(url: str, **dados: Any) -> None:
+    motor = criar_motor(url)
     try:
-        with con:
+        with motor.begin() as con:
             inserir_empresa_se_nao_existe(con, CNPJ, ANTIGA)
             inserir_observacao(
                 con,
@@ -68,7 +68,7 @@ def _gravar_observacao_antiga(caminho: str, **dados: Any) -> None:
                 bruto_json="{}",
             )
     finally:
-        con.close()
+        motor.dispose()
 
 
 class TestConsultar:
