@@ -1,4 +1,4 @@
-"""Linha de comando: `python -m src.cli consultar <cnpj>`.
+"""Linha de comando: `python -m src.cli consultar <cnpj>` e `acompanhar <cnpj>`.
 
 Liga as peças e formata o que o serviço devolve. Quem calcula devolve dado;
 quem imprime só formata: nenhuma regra de negócio mora aqui.
@@ -22,6 +22,7 @@ from .servico import (
     ORIGEM_CACHE_VENCIDO,
     Consulta,
     RegraDeNegocio,
+    acompanhar,
     consultar,
     mudancas,
 )
@@ -42,10 +43,17 @@ def main(
     motor = criar_motor(config.url_banco)
     try:
         with httpx.Client(transport=transporte) as http:
+            coletar = partial(consultar_externo, http=http, config=config)
+            if args.comando == "acompanhar":
+                consulta = acompanhar(
+                    args.cnpj, motor=motor, coletar=coletar, ttl_horas=config.cache_ttl_horas
+                )
+                print(formatar_acompanhamento(consulta))
+                return 0
             consulta = consultar(
                 args.cnpj,
                 motor=motor,
-                coletar=partial(consultar_externo, http=http, config=config),
+                coletar=coletar,
                 ttl_horas=config.cache_ttl_horas,
                 forcar=args.forcar,
             )
@@ -85,6 +93,15 @@ def formatar_ficha(consulta: Consulta) -> str:
         ("Origem", descrever_origem(consulta)),
     )
     return "\n".join(f"{rotulo + ':':<16}{_valor(valor)}" for rotulo, valor in campos)
+
+
+def formatar_acompanhamento(consulta: Consulta) -> str:
+    """Confirma que a empresa entrou na recoleta diária."""
+    observacao = consulta.observacao
+    return (
+        f"Acompanhando {formata_cnpj(observacao['cnpj'])} ({observacao['razao_social']}). "
+        "A coleta diária passa a incluí-la."
+    )
 
 
 def formatar_capital(centavos: int | None) -> str:
@@ -143,6 +160,8 @@ def _interpretar(argumentos: list[str] | None) -> argparse.Namespace:
     comando = comandos.add_parser("consultar", help="mostra a ficha da empresa e o que mudou")
     comando.add_argument("cnpj", help="CNPJ, com ou sem máscara")
     comando.add_argument("--forcar", action="store_true", help="ignora o cache e chama as fontes")
+    comando = comandos.add_parser("acompanhar", help="inclui a empresa na recoleta diária")
+    comando.add_argument("cnpj", help="CNPJ, com ou sem máscara")
     return parser.parse_args(argumentos)
 
 

@@ -1,0 +1,53 @@
+name: coleta
+
+# Recoleta diária das empresas acompanhadas, gravando direto no banco de
+# produção (Supabase). Roda aqui, e não na hospedagem, porque ela dorme quando
+# ninguém acessa. Também pode ser disparada à mão, com um CNPJ para passar a
+# acompanhar antes da coleta.
+on:
+  schedule:
+    - cron: "0 9 * * *" # todo dia às 9h UTC (6h em Brasília)
+  workflow_dispatch:
+    inputs:
+      acompanhar:
+        description: "CNPJ para passar a acompanhar antes da coleta (opcional)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Duas coletas ao mesmo tempo não duplicariam dados (a coleta é idempotente
+# por dia), mas não há motivo para disputar o banco.
+concurrency:
+  group: coleta
+  cancel-in-progress: false
+
+jobs:
+  coleta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # Sem o segredo, a configuração cairia no SQLite padrão e a coleta
+      # "funcionaria" num banco descartável, sem ninguém perceber.
+      - name: Confere o segredo do banco
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Segredo DATABASE_URL ausente."
+            exit 1
+          fi
+      - name: Passa a acompanhar o CNPJ informado
+        if: ${{ inputs.acompanhar != '' }}
+        env:
+          CNPJ: ${{ inputs.acompanhar }}
+        run: python -m src.cli acompanhar "$CNPJ"
+      - name: Coleta as empresas acompanhadas
+        run: python -m src.coletor

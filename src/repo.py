@@ -143,6 +143,23 @@ def registrar_falha(
     )
 
 
+def marcar_acompanhamento(con: Connection, cnpj: str, *, acompanhando: bool) -> None:
+    """Inclui a empresa na recoleta diária, ou a tira de lá."""
+    con.execute(
+        text("UPDATE empresa SET acompanhando = :acompanhando WHERE cnpj = :cnpj"),
+        # A coluna é INTEGER 0/1 nos dois bancos; bool do Python viraria
+        # BOOLEAN no PostgreSQL, que não converte sozinho para INTEGER.
+        {"acompanhando": int(acompanhando), "cnpj": cnpj},
+    )
+
+
+def cnpjs_acompanhados(con: Connection) -> list[str]:
+    """CNPJs marcados para a recoleta diária, em ordem."""
+    return list(
+        con.execute(text("SELECT cnpj FROM empresa WHERE acompanhando = 1 ORDER BY cnpj")).scalars()
+    )
+
+
 def empresa_por_cnpj(con: Connection, cnpj: str) -> dict[str, Any] | None:
     """Devolve a empresa como ``dict`` ou ``None`` se não existir."""
     linha = (

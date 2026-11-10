@@ -15,7 +15,7 @@ import pytest
 
 from src.cli import descrever_origem, formatar_capital, formatar_mudancas, main
 from src.db import criar_motor
-from src.repo import inserir_empresa_se_nao_existe, inserir_observacao
+from src.repo import cnpjs_acompanhados, inserir_empresa_se_nao_existe, inserir_observacao
 from src.servico import ORIGEM_CACHE, ORIGEM_CACHE_VENCIDO, Consulta
 
 CNPJ = "11222333000181"
@@ -195,3 +195,32 @@ class TestFormatacao:
         assert formatar_mudancas(lista) == (
             "Mudanças detectadas (horário UTC):\n  2026-07-15 10:00:00  uf: SP -> RJ"
         )
+
+
+class TestAcompanhar:
+    def _acompanhados(self, url: str) -> list[str]:
+        motor = criar_motor(url)
+        try:
+            with motor.connect() as con:
+                return cnpjs_acompanhados(con)
+        finally:
+            motor.dispose()
+
+    def test_inclui_a_empresa_na_coleta_diaria(
+        self, banco: str, rede_ok: Rede, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        codigo = main(["acompanhar", "11.222.333/0001-81"], transporte=httpx.MockTransport(rede_ok))
+
+        assert codigo == 0
+        assert self._acompanhados(banco) == [CNPJ]
+        assert "Acompanhando 11.222.333/0001-81" in capsys.readouterr().out
+
+    def test_cnpj_invalido_nao_inclui_nada(
+        self, banco: str, rede_ok: Rede, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        codigo = main(["acompanhar", "11222333000182"], transporte=httpx.MockTransport(rede_ok))
+
+        assert codigo == 1
+        assert rede_ok.chamadas == 0
+        assert self._acompanhados(banco) == []
+        assert "CNPJ inválido" in capsys.readouterr().err
