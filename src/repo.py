@@ -143,6 +143,22 @@ def registrar_falha(
     )
 
 
+def ultima_falha(con: Connection, cnpj: str) -> dict[str, Any] | None:
+    """A falha de coleta mais recente da empresa, ou ``None`` se nunca falhou."""
+    linha = (
+        con.execute(
+            text(
+                "SELECT * FROM falha_coleta WHERE cnpj = :cnpj "
+                "ORDER BY ocorrido_em DESC, id DESC LIMIT 1"
+            ),
+            {"cnpj": cnpj},
+        )
+        .mappings()
+        .first()
+    )
+    return dict(linha) if linha else None
+
+
 def marcar_acompanhamento(con: Connection, cnpj: str, *, acompanhando: bool) -> None:
     """Inclui a empresa na recoleta diária, ou a tira de lá."""
     con.execute(
