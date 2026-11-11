@@ -67,6 +67,11 @@
 
   {% if p.acompanhando %}
   <p class="acompanhada">{{ icones.situacao("ok") }}Acompanhada pela coleta diária</p>
+  {% else %}
+  <form class="acompanhar" method="post" action="/empresa/{{ p.cnpj }}/acompanhar">
+    <button class="botao botao-sec" type="submit">Acompanhar diariamente</button>
+    <p class="sub">A coleta confere esta empresa todo dia e registra o que mudar.</p>
+  </form>
   {% endif %}
 </article>
 {% endblock %}

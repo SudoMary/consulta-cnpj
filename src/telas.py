@@ -20,11 +20,82 @@ from .formatacao import (
     gravidade_da_situacao,
     ou_nao_informado,
 )
-from .servico import ORIGEM_CACHE, ORIGEM_CACHE_VENCIDO, Consulta, Historico
+from .servico import (
+    LIMITE_ACOMPANHADAS,
+    ORIGEM_CACHE,
+    ORIGEM_CACHE_VENCIDO,
+    Consulta,
+    Historico,
+    ItemDoPainel,
+)
 from .validacao import formata_cnpj
 
 # Uma mudança de situação ganha destaque no topo da ficha por este tempo.
 DIAS_DE_DESTAQUE = 30
+
+FILTROS_DO_PAINEL = (
+    ("todas", "Todas"),
+    ("mudanca", "Com mudança"),
+    ("falha", "Com falha"),
+    ("ok", "Sem novidades"),
+)
+
+
+def pagina_do_painel(itens: list[ItemDoPainel], filtro: str = "todas") -> dict[str, Any]:
+    """Resumo, filtros com contagem e a lista filtrada de empresas acompanhadas."""
+    if filtro not in dict(FILTROS_DO_PAINEL):
+        filtro = "todas"
+    contagem = {"todas": len(itens)}
+    for estado in ("mudanca", "falha", "ok"):
+        contagem[estado] = sum(1 for item in itens if item.estado == estado)
+    return {
+        "total": len(itens),
+        "mudancas": contagem["mudanca"],
+        "falhas": contagem["falha"],
+        "limite": LIMITE_ACOMPANHADAS,
+        "filtros": [
+            {
+                "valor": valor,
+                "rotulo": rotulo,
+                "quantidade": contagem[valor],
+                "ativo": valor == filtro,
+            }
+            for valor, rotulo in FILTROS_DO_PAINEL
+        ],
+        "itens": [
+            _item_do_painel(item) for item in itens if filtro == "todas" or item.estado == filtro
+        ],
+    }
+
+
+def _item_do_painel(item: ItemDoPainel) -> dict[str, Any]:
+    observacao = item.observacao or {}
+    conteudo: dict[str, Any] = {
+        "cnpj": item.cnpj,
+        "cnpj_formatado": formata_cnpj(item.cnpj),
+        "razao_social": ou_nao_informado(observacao.get("razao_social")),
+        "situacao": ou_nao_informado(observacao.get("situacao")),
+        "gravidade": gravidade_da_situacao(observacao.get("situacao")),
+        "estado": item.estado,
+        "mudanca": None,
+        "texto": "",
+    }
+    if item.estado == "mudanca" and item.ultima_mudanca:
+        conteudo["mudanca"] = _evento(item.ultima_mudanca)
+    elif item.estado == "falha":
+        conteudo["texto"] = (
+            "A última coleta falhou: as fontes estavam fora do ar. "
+            f"A situação mostrada é de {data_hora_br(observacao['coletado_em'])}."
+            if observacao
+            else "A última coleta falhou, e ainda não há dado desta empresa."
+        )
+    elif item.ultima_mudanca:
+        dia = data_hora_br(item.ultima_mudanca["quando"])[:10]
+        conteudo["texto"] = f"Última mudança percebida em {dia}."
+    else:
+        dia = data_hora_br(item.primeira_consulta)[:10]
+        conteudo["texto"] = f"Sem mudanças desde a primeira consulta, em {dia}."
+    return conteudo
 
 
 def pagina_da_empresa(

@@ -1,0 +1,15 @@
+{% import "icones.html" as icones %}
+<li class="item item-{{ item.estado }}">
+  <div class="item-nome">
+    <a href="/empresa/{{ item.cnpj }}">{{ item.razao_social }}</a>
+    <span class="mono">{{ item.cnpj_formatado }}</span>
+  </div>
+  <span class="selo selo-{{ item.gravidade }}">{{ icones.situacao(item.gravidade) }}{{ item.situacao }}</span>
+  <p class="item-evento">
+    {%- if item.mudanca -%}
+    {{ item.mudanca.rotulo }}: <del class="ev-de">{{ item.mudanca.de }}</del><span class="ev-seta" aria-hidden="true">→</span><ins class="ev-para">{{ item.mudanca.para }}</ins> · percebida em {{ item.mudanca.quando }}
+    {%- else -%}
+    {{ item.texto }}
+    {%- endif -%}
+  </p>
+</li>

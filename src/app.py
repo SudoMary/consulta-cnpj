@@ -24,8 +24,8 @@ from .cliente import CnpjNaoEncontrado, TodasAsFontesFalharam, consultar_externo
 from .config import Settings
 from .db import criar_motor
 from .formatacao import MENSAGEM_NAO_ENCONTRADO, MENSAGEM_SEM_FONTES
-from .servico import RegraDeNegocio, consultar, historico, validar_cnpj
-from .telas import pagina_da_empresa
+from .servico import RegraDeNegocio, acompanhar, consultar, historico, painel, validar_cnpj
+from .telas import pagina_da_empresa, pagina_do_painel
 
 _PASTA = Path(__file__).resolve().parent
 _TEMPLATES = Jinja2Templates(directory=_PASTA / "templates")
@@ -56,18 +56,44 @@ def criar_app(
     )
     app.mount("/estatico", StaticFiles(directory=_PASTA / "estatico"), name="estatico")
 
+    def _inicio(request: Request, contexto: dict[str, Any], status_code: int = 200) -> Response:
+        contexto["acompanhadas"] = pagina_do_painel(painel(request.app.state.motor))
+        return _pagina(request, "inicio.html", contexto, status_code=status_code)
+
     @app.get("/", response_class=HTMLResponse)
     def inicio(request: Request) -> Response:
-        return _pagina(request, "inicio.html")
+        return _inicio(request, {})
 
     @app.get("/consulta")
     def consulta(request: Request, cnpj: str = "") -> Response:
         try:
             digitos = validar_cnpj(cnpj)
         except RegraDeNegocio as erro:
-            contexto = {"erro": str(erro), "cnpj": cnpj}
-            return _pagina(request, "inicio.html", contexto, status_code=400)
+            return _inicio(request, {"erro": str(erro), "cnpj": cnpj}, status_code=400)
         return RedirectResponse(f"/empresa/{digitos}", status_code=303)
+
+    @app.get("/acompanhadas", response_class=HTMLResponse)
+    def acompanhadas(request: Request, filtro: str = "todas") -> Response:
+        pagina = pagina_do_painel(painel(request.app.state.motor), filtro)
+        return _pagina(request, "acompanhadas.html", {"p": pagina})
+
+    @app.post("/empresa/{cnpj}/acompanhar")
+    def acompanhar_empresa(request: Request, cnpj: str) -> Response:
+        coletar = partial(consultar_externo, http=request.app.state.http, config=config)
+        try:
+            resultado = acompanhar(
+                cnpj,
+                motor=request.app.state.motor,
+                coletar=coletar,
+                ttl_horas=config.cache_ttl_horas,
+            )
+        except RegraDeNegocio as erro:
+            return _erro(request, 400, "Não foi possível acompanhar", str(erro))
+        except CnpjNaoEncontrado:
+            return _erro(request, 404, "CNPJ não encontrado", MENSAGEM_NAO_ENCONTRADO)
+        except TodasAsFontesFalharam:
+            return _erro(request, 503, "Fontes fora do ar", MENSAGEM_SEM_FONTES)
+        return RedirectResponse(f"/empresa/{resultado.observacao['cnpj']}", status_code=303)
 
     @app.get("/empresa/{cnpj}", response_class=HTMLResponse)
     def empresa(request: Request, cnpj: str) -> Response:
