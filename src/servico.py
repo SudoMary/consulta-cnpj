@@ -37,7 +37,15 @@ CAMPOS_VIGIADOS = (
 ORIGEM_CACHE = "cache"
 ORIGEM_CACHE_VENCIDO = "cache vencido"
 
+# Sem login na v1, qualquer visitante pode acompanhar uma empresa. O limite
+# protege a cota das APIs públicas gratuitas que a coleta diária usa.
+LIMITE_ACOMPANHADAS = 20
+
+# No painel, mudança percebida há até tantos dias conta como novidade.
+DIAS_DE_MUDANCA_RECENTE = 7
+
 _FORMATO_DATA = "%Y-%m-%d %H:%M:%S"
+_PRIORIDADE_NO_PAINEL = {"mudanca": 0, "falha": 1, "ok": 2}
 
 
 class RegraDeNegocio(Exception):
@@ -64,6 +72,21 @@ class Historico:
     mudancas: list[dict[str, Any]]
     primeira_consulta: str | None
     acompanhando: bool
+
+
+@dataclass(frozen=True)
+class ItemDoPainel:
+    """Uma empresa acompanhada, com o que precisa de atenção nela.
+
+    `estado` é "mudanca" (mudou há pouco), "falha" (a tentativa mais recente
+    de coleta falhou) ou "ok".
+    """
+
+    cnpj: str
+    observacao: dict[str, Any] | None
+    ultima_mudanca: dict[str, Any] | None
+    primeira_consulta: str
+    estado: str
 
 
 def validar_cnpj(cnpj_digitado: str | None) -> str:
@@ -126,11 +149,19 @@ def acompanhar(
     """Inclui a empresa na recoleta diária e devolve a consulta feita antes.
 
     Consulta primeiro para só acompanhar empresa que existe: CNPJ inválido ou
-    não encontrado sobe como na consulta comum, sem marcar nada.
+    não encontrado sobe como na consulta comum, sem marcar nada. Passado o
+    limite de empresas acompanhadas, levanta `RegraDeNegocio` antes de consultar.
     """
-    consulta = consultar(
-        cnpj_digitado, motor=motor, coletar=coletar, ttl_horas=ttl_horas, agora=agora
-    )
+    cnpj = validar_cnpj(cnpj_digitado)
+    with motor.connect() as con:
+        acompanhadas = repo.cnpjs_acompanhados(con)
+    if cnpj not in acompanhadas and len(acompanhadas) >= LIMITE_ACOMPANHADAS:
+        raise RegraDeNegocio(
+            f"O limite de {LIMITE_ACOMPANHADAS} empresas acompanhadas foi atingido. "
+            "A coleta diária usa APIs públicas gratuitas e não deve sobrecarregá-las."
+        )
+
+    consulta = consultar(cnpj, motor=motor, coletar=coletar, ttl_horas=ttl_horas, agora=agora)
     with motor.begin() as con:
         repo.marcar_acompanhamento(con, consulta.observacao["cnpj"], acompanhando=True)
     return consulta
@@ -153,6 +184,53 @@ def historico(motor: Engine, cnpj: str) -> Historico:
         primeira_consulta=empresa["primeira_consulta"] if empresa else None,
         acompanhando=bool(empresa and empresa["acompanhando"]),
     )
+
+
+def painel(motor: Engine, *, agora: datetime | None = None) -> list[ItemDoPainel]:
+    """Empresas acompanhadas, com mudanças recentes e falhas primeiro."""
+    agora = agora or datetime.now(UTC)
+    itens: list[ItemDoPainel] = []
+    with motor.connect() as con:
+        for cnpj in repo.cnpjs_acompanhados(con):
+            observacoes = repo.observacoes_por_cnpj(con, cnpj)
+            falha = repo.ultima_falha(con, cnpj)
+            empresa = repo.empresa_por_cnpj(con, cnpj)
+            lista = _comparar(observacoes)
+            ultima_mudanca = lista[-1] if lista else None
+            recente = observacoes[-1] if observacoes else None
+            itens.append(
+                ItemDoPainel(
+                    cnpj=cnpj,
+                    observacao=recente,
+                    ultima_mudanca=ultima_mudanca,
+                    primeira_consulta=empresa["primeira_consulta"],  # type: ignore[index]
+                    estado=_estado_no_painel(ultima_mudanca, recente, falha, agora),
+                )
+            )
+    return sorted(
+        itens,
+        key=lambda item: (
+            _PRIORIDADE_NO_PAINEL[item.estado],
+            (item.observacao or {}).get("razao_social") or "",
+        ),
+    )
+
+
+def _estado_no_painel(
+    ultima_mudanca: dict[str, Any] | None,
+    recente: dict[str, Any] | None,
+    falha: dict[str, Any] | None,
+    agora: datetime,
+) -> str:
+    if ultima_mudanca and _horas_desde(ultima_mudanca["quando"], agora) <= (
+        DIAS_DE_MUDANCA_RECENTE * 24
+    ):
+        return "mudanca"
+    # Falha registrada no mesmo instante da observação é da fonte primária
+    # numa coleta que a reserva salvou: a coleta deu certo.
+    if falha and (recente is None or falha["ocorrido_em"] > recente["coletado_em"]):
+        return "falha"
+    return "ok"
 
 
 def _comparar(observacoes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -200,5 +278,9 @@ def _carimbo(instante: datetime) -> str:
 
 
 def _idade_horas(observacao: dict[str, Any], agora: datetime) -> float:
-    coletado_em = datetime.strptime(observacao["coletado_em"], _FORMATO_DATA).replace(tzinfo=UTC)
-    return (agora - coletado_em).total_seconds() / 3600
+    return _horas_desde(observacao["coletado_em"], agora)
+
+
+def _horas_desde(momento: str, agora: datetime) -> float:
+    instante = datetime.strptime(momento, _FORMATO_DATA).replace(tzinfo=UTC)
+    return (agora - instante).total_seconds() / 3600

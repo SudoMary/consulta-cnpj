@@ -20,9 +20,12 @@ from src.repo import (
     empresa_por_cnpj,
     inserir_empresa_se_nao_existe,
     inserir_observacao,
+    marcar_acompanhamento,
     observacoes_por_cnpj,
+    registrar_falha,
 )
 from src.servico import (
+    LIMITE_ACOMPANHADAS,
     ORIGEM_CACHE,
     ORIGEM_CACHE_VENCIDO,
     Consulta,
@@ -31,6 +34,7 @@ from src.servico import (
     consultar,
     historico,
     mudancas,
+    painel,
     validar_cnpj,
 )
 from tests.falsos import ColetaFalsa, coleta
@@ -357,3 +361,104 @@ class TestHistorico:
 
         assert resultado.mudancas == []
         assert resultado.primeira_consulta is None
+
+
+AGORA_PAINEL = datetime(2026, 11, 10, 12, 0, 0, tzinfo=UTC)
+OUTRO = "11444777000161"
+TERCEIRO = "99999999000191"
+
+
+def _acompanhar_com(motor: Engine, cnpj: str, *observacoes: tuple[str, str]) -> None:
+    """Grava observações (quando, situação) e marca a empresa como acompanhada."""
+    with motor.begin() as con:
+        inserir_empresa_se_nao_existe(con, cnpj, observacoes[0][0])
+        for quando, situacao in observacoes:
+            inserir_observacao(
+                con,
+                cnpj=cnpj,
+                dados={"razao_social": f"EMPRESA {cnpj}", "situacao": situacao},
+                fonte="brasilapi",
+                coletado_em=quando,
+                bruto_json="{}",
+            )
+        marcar_acompanhamento(con, cnpj, acompanhando=True)
+
+
+def _falhou(motor: Engine, cnpj: str, quando: str) -> None:
+    with motor.begin() as con:
+        registrar_falha(con, cnpj=cnpj, fonte="brasilapi", motivo="timeout", ocorrido_em=quando)
+
+
+class TestPainel:
+    def test_mudanca_recente_vem_antes_de_falha_e_de_sem_novidade(self, motor: Engine) -> None:
+        # Arrange: uma empresa em cada estado
+        _acompanhar_com(motor, OUTRO, ("2026-11-01 09:00:00", "ATIVA"))
+        _acompanhar_com(
+            motor, CNPJ, ("2026-10-01 09:00:00", "ATIVA"), ("2026-11-08 09:00:00", "BAIXADA")
+        )
+        _acompanhar_com(motor, TERCEIRO, ("2026-11-09 09:00:00", "ATIVA"))
+        _falhou(motor, TERCEIRO, "2026-11-10 09:00:00")
+
+        # Act
+        itens = painel(motor, agora=AGORA_PAINEL)
+
+        # Assert
+        assert [(item.cnpj, item.estado) for item in itens] == [
+            (CNPJ, "mudanca"),
+            (TERCEIRO, "falha"),
+            (OUTRO, "ok"),
+        ]
+
+    def test_mudanca_antiga_nao_e_novidade(self, motor: Engine) -> None:
+        _acompanhar_com(
+            motor, CNPJ, ("2026-09-01 09:00:00", "ATIVA"), ("2026-10-01 09:00:00", "BAIXADA")
+        )
+
+        [item] = painel(motor, agora=AGORA_PAINEL)
+
+        assert item.estado == "ok"
+        assert item.ultima_mudanca["para"] == "BAIXADA"
+
+    def test_falha_salva_pela_reserva_nao_conta(self, motor: Engine) -> None:
+        # A fonte primária falhou, mas a reserva respondeu no mesmo instante.
+        _acompanhar_com(motor, CNPJ, ("2026-11-10 09:00:00", "ATIVA"))
+        _falhou(motor, CNPJ, "2026-11-10 09:00:00")
+
+        [item] = painel(motor, agora=AGORA_PAINEL)
+
+        assert item.estado == "ok"
+
+    def test_so_entram_empresas_acompanhadas(self, motor: Engine) -> None:
+        _gravar_observacao(motor, "2026-11-01 09:00:00", situacao="ATIVA")
+
+        assert painel(motor, agora=AGORA_PAINEL) == []
+
+
+class TestLimiteDeAcompanhadas:
+    def _encher(self, motor: Engine, quantidade: int) -> None:
+        with motor.begin() as con:
+            for numero in range(1, quantidade + 1):
+                cnpj = f"{numero:014d}"
+                inserir_empresa_se_nao_existe(con, cnpj, "2026-01-01 00:00:00")
+                marcar_acompanhamento(con, cnpj, acompanhando=True)
+
+    def test_passado_o_limite_nao_acompanha_nem_consulta(self, motor: Engine) -> None:
+        self._encher(motor, LIMITE_ACOMPANHADAS)
+        coletar = ColetaFalsa()
+
+        with pytest.raises(RegraDeNegocio, match="limite"):
+            acompanhar(CNPJ, motor=motor, coletar=coletar, ttl_horas=TTL_HORAS, agora=AGORA)
+
+        assert coletar.chamadas == 0
+        assert _empresa(motor) is None
+
+    def test_empresa_ja_acompanhada_nao_esbarra_no_limite(self, motor: Engine) -> None:
+        self._encher(motor, LIMITE_ACOMPANHADAS - 1)
+        primeira = ColetaFalsa(coleta())
+        acompanhar(CNPJ, motor=motor, coletar=primeira, ttl_horas=TTL_HORAS, agora=AGORA)
+
+        de_novo = acompanhar(
+            CNPJ, motor=motor, coletar=ColetaFalsa(), ttl_horas=TTL_HORAS, agora=AGORA
+        )
+
+        assert de_novo.origem == ORIGEM_CACHE
