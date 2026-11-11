@@ -5,8 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from src.servico import ORIGEM_CACHE, ORIGEM_CACHE_VENCIDO, Consulta, Historico
-from src.telas import pagina_da_empresa
+from src.servico import (
+    ORIGEM_CACHE,
+    ORIGEM_CACHE_VENCIDO,
+    Consulta,
+    Historico,
+    ItemDoPainel,
+)
+from src.telas import pagina_da_empresa, pagina_do_painel
 
 AGORA = datetime(2026, 11, 10, 12, 0, 0, tzinfo=UTC)
 
@@ -101,3 +107,35 @@ class TestCartao:
         assert socios(0) == "Nenhum sócio informado"
         assert socios(1) == "1 sócio"
         assert socios(3) == "3 sócios"
+
+
+def _item(estado: str, **campos: Any) -> ItemDoPainel:
+    return ItemDoPainel(
+        cnpj="11222333000181",
+        observacao=_observacao(**campos),
+        ultima_mudanca=None,
+        primeira_consulta="2026-01-01 10:00:00",
+        estado=estado,
+    )
+
+
+class TestPainel:
+    def test_conta_por_estado_e_filtra(self) -> None:
+        itens = [_item("mudanca"), _item("falha"), _item("ok"), _item("ok")]
+
+        pagina = pagina_do_painel(itens, "ok")
+
+        assert (pagina["total"], pagina["mudancas"], pagina["falhas"]) == (4, 1, 1)
+        assert [f["quantidade"] for f in pagina["filtros"]] == [4, 1, 1, 2]
+        assert len(pagina["itens"]) == 2
+
+    def test_filtro_desconhecido_mostra_todas(self) -> None:
+        pagina = pagina_do_painel([_item("ok")], "qualquer")
+
+        assert [f["valor"] for f in pagina["filtros"] if f["ativo"]] == ["todas"]
+        assert len(pagina["itens"]) == 1
+
+    def test_sem_novidade_diz_desde_quando(self) -> None:
+        [item] = pagina_do_painel([_item("ok")])["itens"]
+
+        assert item["texto"] == "Sem mudanças desde a primeira consulta, em 01/01/2026."

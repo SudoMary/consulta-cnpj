@@ -22,6 +22,7 @@ from src.repo import (
     observacao_mais_nova,
     observacoes_por_cnpj,
     registrar_falha,
+    ultima_falha,
 )
 
 CNPJ = "11222333000181"
@@ -275,3 +276,14 @@ class TestAcompanhamento:
             marcar_acompanhamento(con, cnpj, acompanhando=True)
 
         assert cnpjs_acompanhados(con) == [CNPJ, OUTRO_CNPJ]
+
+
+class TestUltimaFalha:
+    def test_none_quando_nunca_falhou(self, con: Connection) -> None:
+        assert ultima_falha(con, CNPJ) is None
+
+    def test_devolve_a_mais_recente(self, con: Connection) -> None:
+        for quando, motivo in ((T0, "timeout"), (T2, "HTTP 500"), (T1, "HTTP 503")):
+            registrar_falha(con, cnpj=CNPJ, fonte="brasilapi", motivo=motivo, ocorrido_em=quando)
+
+        assert ultima_falha(con, CNPJ)["motivo"] == "HTTP 500"

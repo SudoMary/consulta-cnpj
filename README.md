@@ -43,7 +43,7 @@ ruff check . && ruff format --check .      # lint
 
 ## Limitações conhecidas (v1)
 
-- Sem autenticação de usuário.
+- Sem autenticação de usuário. Por isso qualquer visitante pode incluir empresas na coleta diária, até o limite de 20, que protege a cota das APIs públicas. Tirar uma empresa da coleta ainda não tem tela: é feito direto no banco.
 - Sem consulta em lote.
 - Sem integração com Portal da Transparência.
 - Hospedagem gratuita hiberna: a primeira visita depois de um tempo ocioso pode levar cerca de 1 minuto (cold start).

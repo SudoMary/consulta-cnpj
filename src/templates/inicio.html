@@ -16,4 +16,14 @@
     </p>
   </form>
 </section>
+
+{% if acompanhadas and acompanhadas.total %}
+<section class="recentes" aria-labelledby="titulo-recentes">
+  <h2 class="bloco-titulo" id="titulo-recentes">Empresas acompanhadas</h2>
+  <ul class="lista">
+    {% for item in acompanhadas.itens[:3] %}{% include "_item_acompanhada.html" %}{% endfor %}
+  </ul>
+  <a class="ver-todas" href="/acompanhadas">Ver todas ({{ acompanhadas.total }})</a>
+</section>
+{% endif %}
 {% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block titulo %}Empresas acompanhadas · Consulta CNPJ{% endblock %}
+{% block conteudo %}
+<section class="painel" aria-labelledby="titulo-painel">
+  <h1 class="titulo" id="titulo-painel">Empresas acompanhadas</h1>
+
+  {% if p.total %}
+  <p class="resumo">
+    <span><strong>{{ p.total }}</strong> acompanhada{% if p.total != 1 %}s{% endif %}</span>
+    <span class="r-grave"><strong>{{ p.mudancas }}</strong> com mudança nos últimos 7 dias</span>
+    <span class="r-alerta"><strong>{{ p.falhas }}</strong> com falha na última coleta</span>
+  </p>
+
+  <nav class="filtros" aria-label="Filtrar empresas">
+    {% for f in p.filtros %}
+    <a href="/acompanhadas?filtro={{ f.valor }}"{% if f.ativo %} aria-current="page"{% endif %}>{{ f.rotulo }} <span class="n">{{ f.quantidade }}</span></a>
+    {% endfor %}
+  </nav>
+
+  {% if p.itens %}
+  <ul class="lista">
+    {% for item in p.itens %}{% include "_item_acompanhada.html" %}{% endfor %}
+  </ul>
+  {% else %}
+  <p class="vazio">Nenhuma empresa neste filtro.</p>
+  {% endif %}
+  {% else %}
+  <p class="vazio">Nenhuma empresa acompanhada ainda. Abra a ficha de uma empresa e use “Acompanhar diariamente”: a coleta passa a conferi-la todo dia.</p>
+  {% endif %}
+
+  <p class="rodape-coleta">
+    A coleta roda todo dia às 6h (horário de Brasília) no GitHub Actions, para até {{ p.limite }} empresas.
+    <a href="https://github.com/SudoMary/consulta-cnpj/actions/workflows/coleta.yml">Ver as execuções</a>
+  </p>
+</section>
+{% endblock %}

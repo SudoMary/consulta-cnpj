@@ -204,3 +204,47 @@ class TestModoEscuro:
 class TestSaude:
     def test_responde_ok(self, cliente: TestClient) -> None:
         assert cliente.get("/saude").json() == {"status": "ok"}
+
+
+class TestAcompanharPelaWeb:
+    def test_ficha_nao_acompanhada_oferece_o_botao(self, cliente: TestClient) -> None:
+        assert "Acompanhar diariamente" in cliente.get(f"/empresa/{CNPJ}").text
+
+    def test_botao_inclui_a_empresa_e_volta_para_a_ficha(self, cliente: TestClient) -> None:
+        resposta = cliente.post(f"/empresa/{CNPJ}/acompanhar", follow_redirects=False)
+
+        assert resposta.status_code == 303
+        assert resposta.headers["location"] == f"/empresa/{CNPJ}"
+        assert "Acompanhada pela coleta diária" in cliente.get(f"/empresa/{CNPJ}").text
+
+    def test_cnpj_invalido_nao_acompanha(self, cliente: TestClient, rede: Rede) -> None:
+        resposta = cliente.post("/empresa/11222333000182/acompanhar")
+
+        assert resposta.status_code == 400
+        assert rede.chamadas == 0
+
+
+class TestPainel:
+    def test_sem_acompanhadas_explica_como_comecar(self, cliente: TestClient) -> None:
+        assert "Nenhuma empresa acompanhada ainda." in cliente.get("/acompanhadas").text
+
+    def test_mostra_resumo_lista_e_contagem_nos_filtros(self, cliente: TestClient) -> None:
+        cliente.post(f"/empresa/{CNPJ}/acompanhar")
+
+        html = cliente.get("/acompanhadas").text
+
+        assert "CAIXA ESCOLAR" in html
+        assert "<strong>1</strong> acompanhada<" in html
+        assert 'Sem novidades <span class="n">1</span>' in html
+
+    def test_filtro_sem_empresas_avisa(self, cliente: TestClient) -> None:
+        cliente.post(f"/empresa/{CNPJ}/acompanhar")
+
+        html = cliente.get("/acompanhadas?filtro=falha").text
+
+        assert "Nenhuma empresa neste filtro." in html
+
+    def test_inicio_mostra_as_acompanhadas(self, cliente: TestClient) -> None:
+        cliente.post(f"/empresa/{CNPJ}/acompanhar")
+
+        assert "Ver todas (1)" in cliente.get("/").text
