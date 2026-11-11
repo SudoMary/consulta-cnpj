@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block titulo %}{{ titulo }} · Consulta CNPJ{% endblock %}
+{% block conteudo %}
+<section class="erro" aria-labelledby="titulo-erro">
+  <h1 class="titulo" id="titulo-erro">{{ titulo }}</h1>
+  <p class="sub">{{ mensagem }}</p>
+  <a class="botao" href="/">Fazer outra consulta</a>
+</section>
+{% endblock %}

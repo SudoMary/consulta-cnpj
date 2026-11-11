@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="busca-centro" aria-labelledby="titulo-busca">
+  <h1 class="titulo" id="titulo-busca">Consulte uma empresa pelo CNPJ</h1>
+  <p class="sub">Mostramos os dados da Receita Federal e o que mudou desde a última consulta.</p>
+  <form class="busca" id="form-busca" action="/consulta" method="get">
+    <label for="campo-cnpj">CNPJ</label>
+    <div class="busca-linha">
+      <input id="campo-cnpj" name="cnpj" inputmode="numeric" autocomplete="off" spellcheck="false"
+             placeholder="00.000.000/0000-00" value="{{ cnpj or '' }}" aria-describedby="dica-cnpj"
+             required {% if erro %}aria-invalid="true" autofocus{% endif %}>
+      <button class="botao" type="submit">Consultar</button>
+    </div>
+    <p class="dica{% if erro %} grave{% endif %}" id="dica-cnpj" role="status" aria-live="polite">
+      {{- erro or "Pode digitar ou colar, com ou sem pontuação." -}}
+    </p>
+  </form>
+</section>
+{% endblock %}

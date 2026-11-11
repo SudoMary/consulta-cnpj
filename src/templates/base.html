@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Consulta de CNPJ com histórico: dados da Receita Federal e o que mudou entre as consultas.">
+  <title>{% block titulo %}Consulta CNPJ{% endblock %}</title>
+  <script>
+    // Aplica o tema escolhido antes de desenhar a página, para ela não piscar.
+    (function () {
+      try {
+        var tema = localStorage.getItem("tema");
+        if (tema === "claro") document.documentElement.setAttribute("data-theme", "light");
+        if (tema === "escuro") document.documentElement.setAttribute("data-theme", "dark");
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="/estatico/estilo.css">
+</head>
+<body>
+  <a class="pular" href="#conteudo">Pular para o conteúdo</a>
+  <header class="topo">
+    <div class="topo-interno">
+      <a class="logo" href="/">Consulta CNPJ</a>
+      <nav class="topo-nav" aria-label="Principal">
+        {% block navegacao %}{% endblock %}
+        <button class="tema" type="button" id="alternar-tema" hidden>Tema automático</button>
+      </nav>
+    </div>
+  </header>
+  <main class="pagina" id="conteudo">
+    {% block conteudo %}{% endblock %}
+  </main>
+  <footer class="rodape">
+    <div class="rodape-interno">
+      Dados públicos da Receita Federal, via BrasilAPI e Minha Receita.
+      <a href="https://github.com/SudoMary/consulta-cnpj">Código no GitHub</a>
+    </div>
+  </footer>
+  <script src="/estatico/app.js" defer></script>
+</body>
+</html>
