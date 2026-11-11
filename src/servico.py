@@ -57,6 +57,22 @@ class Consulta:
     idade_horas: float
 
 
+@dataclass(frozen=True)
+class Historico:
+    """O que se sabe da empresa ao longo do tempo, para a linha do tempo."""
+
+    mudancas: list[dict[str, Any]]
+    primeira_consulta: str | None
+    acompanhando: bool
+
+
+def validar_cnpj(cnpj_digitado: str | None) -> str:
+    """Devolve só os dígitos do CNPJ, ou levanta `RegraDeNegocio` se ele não fechar."""
+    if not cnpj_valido(cnpj_digitado):
+        raise RegraDeNegocio("CNPJ inválido: confira os 14 dígitos digitados.")
+    return so_digitos(cnpj_digitado)  # type: ignore[arg-type]
+
+
 def consultar(
     cnpj_digitado: str,
     *,
@@ -72,10 +88,7 @@ def consultar(
     externa. Deixa subir `CnpjNaoEncontrado`, e `TodasAsFontesFalharam` quando
     não há observação antiga para entregar no lugar.
     """
-    if not cnpj_valido(cnpj_digitado):
-        raise RegraDeNegocio("CNPJ inválido: confira os 14 dígitos digitados.")
-
-    cnpj = so_digitos(cnpj_digitado)
+    cnpj = validar_cnpj(cnpj_digitado)
     agora = agora or datetime.now(UTC)
     with motor.connect() as con:
         recente = repo.observacao_mais_nova(con, cnpj)
@@ -127,7 +140,22 @@ def mudancas(motor: Engine, cnpj: str) -> list[dict[str, Any]]:
     """Compara observações consecutivas e lista o que mudou nos campos vigiados."""
     with motor.connect() as con:
         observacoes = repo.observacoes_por_cnpj(con, cnpj)
+    return _comparar(observacoes)
 
+
+def historico(motor: Engine, cnpj: str) -> Historico:
+    """Mudanças, data da primeira consulta e se a empresa está na coleta diária."""
+    with motor.connect() as con:
+        observacoes = repo.observacoes_por_cnpj(con, cnpj)
+        empresa = repo.empresa_por_cnpj(con, cnpj)
+    return Historico(
+        mudancas=_comparar(observacoes),
+        primeira_consulta=empresa["primeira_consulta"] if empresa else None,
+        acompanhando=bool(empresa and empresa["acompanhando"]),
+    )
+
+
+def _comparar(observacoes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     lista: list[dict[str, Any]] = []
     for antes, depois in pairwise(observacoes):
         for campo in CAMPOS_VIGIADOS:

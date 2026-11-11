@@ -29,7 +29,9 @@ from src.servico import (
     RegraDeNegocio,
     acompanhar,
     consultar,
+    historico,
     mudancas,
+    validar_cnpj,
 )
 from tests.falsos import ColetaFalsa, coleta
 
@@ -327,3 +329,31 @@ class TestAcompanhar:
             acompanhar(CNPJ, motor=motor, coletar=coletar, ttl_horas=TTL_HORAS, agora=AGORA)
 
         assert _empresa(motor) is None
+
+
+class TestValidarCnpj:
+    def test_devolve_so_os_digitos(self) -> None:
+        assert validar_cnpj("11.222.333/0001-81") == CNPJ
+
+    @pytest.mark.parametrize("cnpj", ["11222333000182", "", None])
+    def test_cnpj_invalido_levanta_regra_de_negocio(self, cnpj: str | None) -> None:
+        with pytest.raises(RegraDeNegocio, match="CNPJ inválido"):
+            validar_cnpj(cnpj)
+
+
+class TestHistorico:
+    def test_reune_mudancas_primeira_consulta_e_acompanhamento(self, motor: Engine) -> None:
+        _gravar_observacao(motor, "2026-03-01 10:00:00", situacao="ATIVA")
+        _gravar_observacao(motor, "2026-07-15 10:00:00", situacao="BAIXADA")
+
+        resultado = historico(motor, CNPJ)
+
+        assert [m["campo"] for m in resultado.mudancas] == ["situacao"]
+        assert resultado.primeira_consulta == "2026-03-01 10:00:00"
+        assert resultado.acompanhando is False
+
+    def test_empresa_desconhecida_tem_historico_vazio(self, motor: Engine) -> None:
+        resultado = historico(motor, CNPJ)
+
+        assert resultado.mudancas == []
+        assert resultado.primeira_consulta is None
