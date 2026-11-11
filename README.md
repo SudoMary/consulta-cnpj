@@ -14,7 +14,7 @@ Consultar é fácil — existe API pública para isso. O que não existe pronto 
 
 ## Como rodar
 
-**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, pela linha de comando. A tela web chega no fim da Entrega 3.
+**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando. Falta o site no ar.
 
 ```bash
 python -m venv .venv
@@ -22,6 +22,7 @@ python -m venv .venv
 # source .venv/bin/activate       # macOS / Linux
 pip install -r requirements-dev.txt
 
+uvicorn src.app:app --reload                               # site em http://127.0.0.1:8000
 python -m src.cli consultar 11.222.333/0001-81             # usa o cache de 24 horas
 python -m src.cli consultar 11.222.333/0001-81 --forcar    # ignora o cache
 python -m src.cli acompanhar 11.222.333/0001-81            # entra na coleta diária

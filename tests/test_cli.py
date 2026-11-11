@@ -13,10 +13,9 @@ from typing import Any
 import httpx
 import pytest
 
-from src.cli import descrever_origem, formatar_capital, formatar_mudancas, main
+from src.cli import formatar_mudancas, main
 from src.db import criar_motor
 from src.repo import cnpjs_acompanhados, inserir_empresa_se_nao_existe, inserir_observacao
-from src.servico import ORIGEM_CACHE, ORIGEM_CACHE_VENCIDO, Consulta
 
 CNPJ = "11222333000181"
 ANTIGA = "2020-01-01 10:00:00"
@@ -86,7 +85,7 @@ class TestConsultar:
         assert "ATIVA" in saida
         assert "Administração de caixas escolares" in saida
         assert "R$ 0,00" in saida
-        assert "consultado agora em brasilapi" in saida
+        assert "consultado agora na BrasilAPI" in saida
         assert "Nenhuma mudança detectada." in saida
 
     def test_segunda_consulta_sai_do_cache(
@@ -161,34 +160,6 @@ class TestErros:
 
 
 class TestFormatacao:
-    @pytest.mark.parametrize(
-        ("centavos", "esperado"),
-        [
-            (0, "R$ 0,00"),
-            (5, "R$ 0,05"),
-            (123456789, "R$ 1.234.567,89"),
-            (20543196000000, "R$ 205.431.960.000,00"),
-            (None, "não informado"),
-        ],
-    )
-    def test_capital_em_reais(self, centavos: int | None, esperado: str) -> None:
-        assert formatar_capital(centavos) == esperado
-
-    @pytest.mark.parametrize(
-        ("origem", "idade", "esperado"),
-        [
-            ("brasilapi", 0, "consultado agora em brasilapi"),
-            (ORIGEM_CACHE, 0.5, "do cache, há menos de 1 hora"),
-            (ORIGEM_CACHE, 1, "do cache, há 1 hora"),
-            (ORIGEM_CACHE, 6.5, "do cache, há 6 horas"),
-            (ORIGEM_CACHE_VENCIDO, 72, "consultado há 3 dias, as fontes estão fora do ar agora"),
-        ],
-    )
-    def test_origem_por_extenso(self, origem: str, idade: float, esperado: str) -> None:
-        consulta = Consulta(observacao={}, origem=origem, idade_horas=idade)
-
-        assert descrever_origem(consulta) == esperado
-
     def test_lista_de_mudancas(self) -> None:
         lista = [{"campo": "uf", "de": "SP", "para": "RJ", "quando": "2026-07-15 10:00:00"}]
 

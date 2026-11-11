@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% import "icones.html" as icones %}
+{% block titulo %}{{ p.razao_social }} · Consulta CNPJ{% endblock %}
+{% block conteudo %}
+<article class="ficha" aria-labelledby="titulo-empresa">
+  {% if p.fontes_fora %}
+  <div class="aviso" role="status">
+    {{ icones.aviso() }}
+    <p><strong>As fontes estão fora do ar agora.</strong> Mostrando a última consulta, de {{ p.origem.quando }}. A próxima visita tenta de novo.</p>
+  </div>
+  {% endif %}
+
+  <a class="voltar" href="/">← Nova consulta</a>
+
+  <header class="ficha-cabeca">
+    <div class="ficha-nome">
+      <h1 class="titulo" id="titulo-empresa">{{ p.razao_social }}</h1>
+      <p class="cnpj-linha">
+        <span class="mono">{{ p.cnpj_formatado }}</span>
+        <button class="copiar" type="button" data-copiar="{{ p.cnpj }}" hidden>Copiar CNPJ</button>
+      </p>
+    </div>
+    <div class="situacao-bloco">
+      <span class="selo selo-{{ p.gravidade }}">{{ icones.situacao(p.gravidade) }}{{ p.situacao }}</span>
+      {% if p.situacao_desde %}<small>desde {{ p.situacao_desde }}, segundo a Receita</small>{% endif %}
+    </div>
+  </header>
+
+  {% if p.destaque %}
+  <div class="mudou">
+    <p><strong>A situação mudou de {{ p.destaque.de }} para {{ p.destaque.para }}.</strong> A mudança foi percebida em {{ p.destaque.quando }}.</p>
+    <a href="#linha-do-tempo">Ver a linha do tempo</a>
+  </div>
+  {% endif %}
+
+  <p class="origem origem-{{ p.origem.tipo }}">
+    <span class="ponto" aria-hidden="true"></span>
+    <span>{{ p.origem.texto }} · {{ p.origem.quando }} (horário de Brasília)</span>
+  </p>
+
+  <dl class="cartao">
+    {% for campo in p.cartao %}
+    <div{% if campo.largo %} class="largo"{% endif %}>
+      <dt>{{ campo.rotulo }}</dt>
+      <dd{% if campo.mono %} class="mono"{% endif %}>{{ campo.valor }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+
+  <section class="linha-tempo" id="linha-do-tempo" aria-labelledby="titulo-linha">
+    <h2 class="bloco-titulo" id="titulo-linha">Linha do tempo</h2>
+    <ol>
+      {% for evento in p.linha_do_tempo %}
+      <li{% if evento.grave %} class="grave"{% endif %}>
+        <span class="ev-data mono">{{ evento.quando }}</span>
+        <span>{{ evento.rotulo }}: <del class="ev-de">{{ evento.de }}</del><span class="ev-seta" aria-hidden="true">→</span><ins class="ev-para">{{ evento.para }}</ins></span>
+      </li>
+      {% endfor %}
+      {% if p.primeira_consulta %}
+      <li>
+        <span class="ev-data mono">{{ p.primeira_consulta }}</span>
+        <span>{% if p.linha_do_tempo %}Primeira consulta{% else %}Primeira consulta. Nenhuma mudança desde então.{% endif %}</span>
+      </li>
+      {% endif %}
+    </ol>
+  </section>
+
+  {% if p.acompanhando %}
+  <p class="acompanhada">{{ icones.situacao("ok") }}Acompanhada pela coleta diária</p>
+  {% endif %}
+</article>
+{% endblock %}
