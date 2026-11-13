@@ -113,6 +113,34 @@ def observacao_mais_nova(con: Connection, cnpj: str) -> dict[str, Any] | None:
     return dict(linha) if linha else None
 
 
+def observacoes_mais_novas(con: Connection) -> list[dict[str, Any]]:
+    """A observação mais recente de cada empresa, em ordem de CNPJ.
+
+    Uma linha por empresa, com o desempate de `observacao_mais_nova`, mais a
+    coluna ``acompanhando`` da empresa.
+    """
+    linhas = con.execute(
+        text(
+            "SELECT o.*, e.acompanhando FROM observacao o "
+            "JOIN empresa e ON e.cnpj = o.cnpj "
+            "WHERE o.id = ("
+            "SELECT o2.id FROM observacao o2 WHERE o2.cnpj = o.cnpj "
+            "ORDER BY o2.coletado_em DESC, o2.id DESC LIMIT 1"
+            ") ORDER BY o.cnpj"
+        )
+    ).mappings()
+    return [dict(linha) for linha in linhas]
+
+
+def cnpjs_com_historico(con: Connection) -> list[str]:
+    """CNPJs com mais de uma observação: só neles pode haver mudança."""
+    return list(
+        con.execute(
+            text("SELECT cnpj FROM observacao GROUP BY cnpj HAVING COUNT(*) > 1 ORDER BY cnpj")
+        ).scalars()
+    )
+
+
 def atualizar_ultima_consulta(con: Connection, cnpj: str, agora: str) -> None:
     """Atualiza ``empresa.ultima_consulta``. Não toca em ``primeira_consulta``."""
     con.execute(
@@ -184,3 +212,41 @@ def empresa_por_cnpj(con: Connection, cnpj: str) -> dict[str, Any] | None:
         .first()
     )
     return dict(linha) if linha else None
+
+
+def registrar_pergunta(
+    con: Connection,
+    *,
+    feita_em: str,
+    texto: str,
+    modelo: str,
+    desfecho: str,
+    chamadas: int,
+    tokens_entrada: int,
+    tokens_saida: int,
+) -> None:
+    """Registra uma pergunta feita ao assistente e quanto ela gastou."""
+    con.execute(
+        text(
+            "INSERT INTO pergunta "
+            "(feita_em, texto, modelo, desfecho, chamadas, tokens_entrada, tokens_saida) "
+            "VALUES (:feita_em, :texto, :modelo, :desfecho, :chamadas, "
+            ":tokens_entrada, :tokens_saida)"
+        ),
+        {
+            "feita_em": feita_em,
+            "texto": texto,
+            "modelo": modelo,
+            "desfecho": desfecho,
+            "chamadas": chamadas,
+            "tokens_entrada": tokens_entrada,
+            "tokens_saida": tokens_saida,
+        },
+    )
+
+
+def perguntas_desde(con: Connection, momento: str) -> int:
+    """Quantas perguntas foram feitas a partir de ``momento``, inclusive."""
+    return con.execute(
+        text("SELECT COUNT(*) FROM pergunta WHERE feita_em >= :momento"), {"momento": momento}
+    ).scalar_one()

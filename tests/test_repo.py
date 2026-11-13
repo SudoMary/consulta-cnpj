@@ -11,17 +11,22 @@ from typing import Any
 
 import pytest
 from sqlalchemy import Connection, Engine, text
+from sqlalchemy.exc import IntegrityError
 
 from src.repo import (
     atualizar_ultima_consulta,
     cnpjs_acompanhados,
+    cnpjs_com_historico,
     empresa_por_cnpj,
     inserir_empresa_se_nao_existe,
     inserir_observacao,
     marcar_acompanhamento,
     observacao_mais_nova,
+    observacoes_mais_novas,
     observacoes_por_cnpj,
+    perguntas_desde,
     registrar_falha,
+    registrar_pergunta,
     ultima_falha,
 )
 
@@ -287,3 +292,101 @@ class TestUltimaFalha:
             registrar_falha(con, cnpj=CNPJ, fonte="brasilapi", motivo=motivo, ocorrido_em=quando)
 
         assert ultima_falha(con, CNPJ)["motivo"] == "HTTP 500"
+
+
+def _gravar_situacao(con: Connection, cnpj: str, quando: str, situacao: str) -> None:
+    inserir_empresa_se_nao_existe(con, cnpj, T0)
+    inserir_observacao(
+        con,
+        cnpj=cnpj,
+        dados={"razao_social": f"EMPRESA {cnpj}", "situacao": situacao},
+        fonte="brasilapi",
+        coletado_em=quando,
+        bruto_json="{}",
+    )
+
+
+class TestObservacoesMaisNovas:
+    def test_vazio_quando_nao_ha_empresas(self, con: Connection) -> None:
+        assert observacoes_mais_novas(con) == []
+
+    def test_uma_linha_por_empresa_com_a_coleta_mais_recente(self, con: Connection) -> None:
+        for quando, situacao in ((T1, "SUSPENSA"), (T0, "ATIVA"), (T2, "BAIXADA")):
+            _gravar_situacao(con, CNPJ, quando, situacao)
+        _gravar_situacao(con, OUTRO_CNPJ, T0, "ATIVA")
+
+        linhas = observacoes_mais_novas(con)
+
+        assert [(linha["cnpj"], linha["situacao"]) for linha in linhas] == [
+            (CNPJ, "BAIXADA"),
+            (OUTRO_CNPJ, "ATIVA"),
+        ]
+
+    def test_no_mesmo_segundo_vence_a_ultima_gravada(self, con: Connection) -> None:
+        _gravar_situacao(con, CNPJ, T0, "ATIVA")
+        _gravar_situacao(con, CNPJ, T0, "BAIXADA")
+
+        assert [linha["situacao"] for linha in observacoes_mais_novas(con)] == ["BAIXADA"]
+
+    def test_traz_se_a_empresa_e_acompanhada(self, con: Connection) -> None:
+        _gravar_situacao(con, CNPJ, T0, "ATIVA")
+        _gravar_situacao(con, OUTRO_CNPJ, T0, "ATIVA")
+        marcar_acompanhamento(con, OUTRO_CNPJ, acompanhando=True)
+
+        linhas = observacoes_mais_novas(con)
+        acompanhando = {linha["cnpj"]: linha["acompanhando"] for linha in linhas}
+
+        assert acompanhando == {CNPJ: 0, OUTRO_CNPJ: 1}
+
+
+class TestCnpjsComHistorico:
+    def test_so_empresas_com_mais_de_uma_observacao(self, con: Connection) -> None:
+        _gravar_situacao(con, CNPJ, T0, "ATIVA")
+        _gravar_situacao(con, CNPJ, T1, "ATIVA")
+        _gravar_situacao(con, OUTRO_CNPJ, T0, "ATIVA")
+
+        assert cnpjs_com_historico(con) == [CNPJ]
+
+
+class TestPerguntas:
+    def _registrar(self, con: Connection, feita_em: str) -> None:
+        registrar_pergunta(
+            con,
+            feita_em=feita_em,
+            texto="Quais empresas mudaram?",
+            modelo="modelo-teste",
+            desfecho="respondida",
+            chamadas=2,
+            tokens_entrada=1500,
+            tokens_saida=200,
+        )
+
+    def test_grava_todos_os_campos(self, con: Connection) -> None:
+        self._registrar(con, T1)
+
+        linha = _linha(con, "SELECT * FROM pergunta")
+        assert linha is not None
+        assert linha["feita_em"] == T1
+        assert linha["texto"] == "Quais empresas mudaram?"
+        assert linha["desfecho"] == "respondida"
+        assert (linha["chamadas"], linha["tokens_entrada"], linha["tokens_saida"]) == (2, 1500, 200)
+
+    def test_desfecho_desconhecido_e_recusado_pelo_banco(self, con: Connection) -> None:
+        with pytest.raises(IntegrityError):
+            registrar_pergunta(
+                con,
+                feita_em=T0,
+                texto="?",
+                modelo="m",
+                desfecho="talvez",
+                chamadas=0,
+                tokens_entrada=0,
+                tokens_saida=0,
+            )
+
+    def test_conta_a_partir_do_momento_inclusive(self, con: Connection) -> None:
+        for quando in (T0, T1, T2):
+            self._registrar(con, quando)
+
+        assert perguntas_desde(con, T1) == 2
+        assert perguntas_desde(con, "2026-01-04 00:00:00") == 0

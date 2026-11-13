@@ -53,7 +53,9 @@ def _apagar_tabelas(url: str) -> None:
     # O PostgreSQL de teste é compartilhado entre os testes: cada um começa do zero.
     motor = create_engine(url)
     with motor.begin() as con:
-        con.exec_driver_sql("DROP TABLE IF EXISTS observacao, falha_coleta, empresa CASCADE")
+        con.exec_driver_sql(
+            "DROP TABLE IF EXISTS observacao, falha_coleta, pergunta, empresa CASCADE"
+        )
     motor.dispose()
 
 
