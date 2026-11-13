@@ -76,3 +76,23 @@ CREATE TABLE IF NOT EXISTS falha_coleta (
     fonte       TEXT NOT NULL,
     motivo      TEXT NOT NULL                      -- mensagem legivel (timeout, HTTP 500, etc.)
 );
+
+-- ---------------------------------------------------------------------
+-- pergunta: cada pergunta feita ao assistente, para medir uso e custo.
+--
+-- O limite diario de perguntas conta as linhas daqui. O texto fica guardado
+-- para avaliar as respostas depois; a resposta nao e guardada.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pergunta (
+    id             CHAVE_SUBSTITUTA,
+    feita_em       TEXT    NOT NULL,               -- ISO 'YYYY-MM-DD HH:MM:SS', UTC
+    texto          TEXT    NOT NULL,
+    modelo         TEXT    NOT NULL,
+    desfecho       TEXT    NOT NULL
+        CHECK (desfecho IN ('respondida', 'recusada', 'sem_conclusao', 'erro')),
+    chamadas       INTEGER NOT NULL,               -- chamadas ao modelo nesta pergunta
+    tokens_entrada BIGINT  NOT NULL,
+    tokens_saida   BIGINT  NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pergunta_feita_em ON pergunta(feita_em);

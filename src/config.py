@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     cache_ttl_horas: int = Field(default=24, gt=0)
     http_timeout_segundos: int = Field(default=8, gt=0)
     database_url: str = "sqlite:///./dados/consulta_cnpj.db"
+
+    # Assistente: sem chave, ele fica desligado e o resto funciona igual.
+    # SecretStr mascara a chave em log e mensagem de erro.
+    anthropic_api_key: SecretStr | None = None
+    assistente_modelo: str = "claude-opus-5-5"
+    # Cada pergunta custa dinheiro e o site não tem login: o limite protege a conta.
+    assistente_limite_diario: int = Field(default=20, gt=0)
 
     @property
     def url_banco(self) -> str:

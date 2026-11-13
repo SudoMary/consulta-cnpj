@@ -45,7 +45,7 @@ _GRAVIDADE = {
 
 # O banco guarda UTC; a tela mostra Brasília, que não tem horário de verão
 # desde 2019. Fuso fixo evita depender da base de fusos do sistema.
-_BRASILIA = timedelta(hours=-3)
+FUSO_DE_BRASILIA = timedelta(hours=-3)
 _FORMATO_BANCO = "%Y-%m-%d %H:%M:%S"
 
 
@@ -108,7 +108,7 @@ def data_br(data_iso: str | None) -> str:
 
 def data_hora_br(momento_utc: str) -> str:
     """Momento gravado em UTC, mostrado no horário de Brasília."""
-    momento = datetime.strptime(momento_utc, _FORMATO_BANCO) + _BRASILIA
+    momento = datetime.strptime(momento_utc, _FORMATO_BANCO) + FUSO_DE_BRASILIA
     return momento.strftime("%d/%m/%Y, %H:%M")
 
 
