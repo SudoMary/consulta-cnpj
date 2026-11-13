@@ -7,15 +7,20 @@ falha usam 403 porque ele não é repetido, e o teste não precisa dormir.
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+import anthropic
 import httpx
+import httpx2
 import pytest
 
 from src.cli import formatar_mudancas, main
+from src.config import Settings
 from src.db import criar_motor
 from src.repo import cnpjs_acompanhados, inserir_empresa_se_nao_existe, inserir_observacao
+from tests.falsos import ClienteIAFalso, resposta_texto
 
 CNPJ = "11222333000181"
 ANTIGA = "2020-01-01 10:00:00"
@@ -195,3 +200,52 @@ class TestAcompanhar:
         assert rede_ok.chamadas == 0
         assert self._acompanhados(banco) == []
         assert "CNPJ inválido" in capsys.readouterr().err
+
+
+class TestPerguntar:
+    """O cliente da API é falso: nenhum teste chama o Claude de verdade."""
+
+    def test_imprime_a_resposta_do_assistente(
+        self, banco: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cliente = ClienteIAFalso(resposta_texto("Nenhuma empresa mudou este mês."))
+
+        codigo = main(["perguntar", "O que mudou este mês?"], cliente_ia=cliente)
+
+        assert codigo == 0
+        assert capsys.readouterr().out.strip() == "Nenhuma empresa mudou este mês."
+        assert cliente.chamadas == 1
+
+    def test_sem_chave_explica_como_ligar(
+        self, banco: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        # Um .env da máquina de quem roda os testes não pode ligar o assistente.
+        monkeypatch.setattr("src.cli.Settings", partial(Settings, _env_file=None))
+
+        codigo = main(["perguntar", "O que mudou?"])
+
+        assert codigo == 1
+        assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+    def test_pergunta_vazia_nao_chama_o_modelo(
+        self, banco: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cliente = ClienteIAFalso()
+
+        codigo = main(["perguntar", "   "], cliente_ia=cliente)
+
+        assert codigo == 1
+        assert cliente.chamadas == 0
+        assert "Escreva uma pergunta" in capsys.readouterr().err
+
+    def test_api_fora_do_ar_tem_mensagem_clara(
+        self, banco: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        pedido = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+        cliente = ClienteIAFalso(anthropic.APIConnectionError(request=pedido))
+
+        codigo = main(["perguntar", "O que mudou?"], cliente_ia=cliente)
+
+        assert codigo == 1
+        assert "fora do ar" in capsys.readouterr().err

@@ -1,4 +1,4 @@
-"""Linha de comando: `python -m src.cli consultar <cnpj>` e `acompanhar <cnpj>`.
+"""Linha de comando: `consultar <cnpj>`, `acompanhar <cnpj>` e `perguntar "<pergunta>"`.
 
 Liga as peças e formata o que o serviço devolve. Quem calcula devolve dado;
 quem imprime só formata: nenhuma regra de negócio mora aqui.
@@ -12,8 +12,10 @@ from collections.abc import Iterable
 from functools import partial
 from typing import Any
 
+import anthropic
 import httpx
 
+from .assistente import MENSAGEM_SEM_CHAVE, AssistenteIndisponivel, criar_cliente, perguntar
 from .cliente import CnpjNaoEncontrado, TodasAsFontesFalharam, consultar_externo
 from .config import Settings
 from .db import criar_motor
@@ -28,16 +30,33 @@ from .validacao import formata_cnpj
 
 
 def main(
-    argumentos: list[str] | None = None, *, transporte: httpx.BaseTransport | None = None
+    argumentos: list[str] | None = None,
+    *,
+    transporte: httpx.BaseTransport | None = None,
+    cliente_ia: anthropic.Anthropic | None = None,
 ) -> int:
     """Executa o comando e devolve o código de saída do processo.
 
-    `transporte` existe para os testes trocarem a rede por uma falsa.
+    `transporte` e `cliente_ia` existem para os testes trocarem a rede e a API
+    do Claude por falsas.
     """
     args = _interpretar(argumentos)
     config = Settings()
     motor = criar_motor(config.url_banco)
     try:
+        if args.comando == "perguntar":
+            cliente = cliente_ia or criar_cliente(config)
+            if cliente is None:
+                return _falhar(MENSAGEM_SEM_CHAVE)
+            resposta = perguntar(
+                args.pergunta,
+                motor=motor,
+                cliente=cliente,
+                modelo=config.assistente_modelo,
+                limite_diario=config.assistente_limite_diario,
+            )
+            print(resposta.texto)
+            return 0
         with httpx.Client(transport=transporte) as http:
             coletar = partial(consultar_externo, http=http, config=config)
             if args.comando == "acompanhar":
@@ -62,6 +81,8 @@ def main(
         return _falhar(MENSAGEM_NAO_ENCONTRADO)
     except TodasAsFontesFalharam:
         return _falhar(MENSAGEM_SEM_FONTES)
+    except AssistenteIndisponivel as erro:
+        return _falhar(str(erro))
     finally:
         motor.dispose()
     return 0
@@ -108,6 +129,10 @@ def _interpretar(argumentos: list[str] | None) -> argparse.Namespace:
     comando.add_argument("--forcar", action="store_true", help="ignora o cache e chama as fontes")
     comando = comandos.add_parser("acompanhar", help="inclui a empresa na recoleta diária")
     comando.add_argument("cnpj", help="CNPJ, com ou sem máscara")
+    comando = comandos.add_parser(
+        "perguntar", help="pergunta ao assistente sobre as empresas já consultadas"
+    )
+    comando.add_argument("pergunta", help='entre aspas: "quais empresas mudaram este mês?"')
     return parser.parse_args(argumentos)
 
 
