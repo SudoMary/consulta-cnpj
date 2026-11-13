@@ -93,3 +93,37 @@ class TestValidacao:
 
         with pytest.raises(ValidationError):
             _settings_sem_env_file()
+
+
+class TestAssistente:
+    def test_desligado_e_com_padroes_quando_nada_foi_definido(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for var in ("ANTHROPIC_API_KEY", "ASSISTENTE_MODELO", "ASSISTENTE_LIMITE_DIARIO"):
+            monkeypatch.delenv(var, raising=False)
+
+        settings = _settings_sem_env_file()
+
+        assert settings.anthropic_api_key is None
+        assert settings.assistente_modelo == "claude-opus-5-5"
+        assert settings.assistente_limite_diario == 20
+
+    def test_le_a_chave_do_ambiente_sem_expor_o_valor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-secreta")
+
+        settings = _settings_sem_env_file()
+
+        assert settings.anthropic_api_key is not None
+        assert settings.anthropic_api_key.get_secret_value() == "chave-secreta"
+        # Em log ou mensagem de erro, a chave aparece mascarada.
+        assert "chave-secreta" not in repr(settings)
+
+    def test_limite_diario_nao_positivo_levanta_validation_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ASSISTENTE_LIMITE_DIARIO", "0")
+
+        with pytest.raises(ValidationError):
+            _settings_sem_env_file()
