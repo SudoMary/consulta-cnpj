@@ -12,9 +12,41 @@ E o problema que ninguém resolve: a situação cadastral muda e ninguém perceb
 
 Consultar é fácil — existe API pública para isso. O que não existe pronto é guardar o que foi consultado e avisar quando mudou.
 
+## Como funciona
+
+```
+ entradas      src/app.py         site (FastAPI + HTML montado no servidor, modo escuro)
+               src/cli.py         linha de comando: consultar, acompanhar, perguntar
+               src/coletor.py     coleta diária das empresas acompanhadas (GitHub Actions)
+               src/assistente.py  perguntas em português, respondidas pelo Claude
+                   │
+ regras        src/servico.py     valida o CNPJ, usa o cache, grava a observação, detecta mudança
+                   │
+ integração    src/cliente.py     timeout, novas tentativas com espera crescente, fonte reserva
+               src/fontes/        um adaptador por API (BrasilAPI, Minha Receita), mesmo formato
+                   │
+ dados         src/repo.py        SQL escrito à mão, com parâmetros; a única camada que fala SQL
+               src/db.py          SQLite no desenvolvimento, PostgreSQL (Supabase) em produção
+```
+
+Cada camada recebe de fora o que depende do mundo (banco, rede, relógio, API do modelo). Por isso os testes trocam a rede por uma falsa e rodam sem conexão, e a mesma regra serve ao site, à linha de comando e à coleta.
+
+| Módulo | O que faz |
+|---|---|
+| `src/validacao.py` | Confere os dígitos verificadores do CNPJ antes de qualquer chamada externa. |
+| `src/fontes/` | Busca na BrasilAPI e na Minha Receita e traduz as duas respostas para o mesmo formato. |
+| `src/cliente.py` | Timeout, novas tentativas com espera crescente só para erro temporário (5xx, 429, rede), e a fonte reserva quando a primária falha. |
+| `src/servico.py` | Cache de 24 horas, gravação append-only numa transação, detecção de mudança nos campos que importam e o painel das acompanhadas. |
+| `src/repo.py` + `schema.sql` | Tabelas `empresa`, `observacao` (histórico, nunca alterado), `falha_coleta` e `pergunta`. O mesmo SQL roda nos dois bancos. |
+| `src/coletor.py` | Recoleta diária idempotente: rodar duas vezes no mesmo dia não duplica nada. |
+| `src/assistente.py` | O Claude responde usando quatro ferramentas que só leem o banco; limite diário e registro de tokens por pergunta. |
+| `src/app.py`, `src/telas.py`, `src/formatacao.py` | Busca, ficha da empresa com linha do tempo das mudanças e painel das acompanhadas. |
+
+**Stack:** Python 3.12, FastAPI e Jinja2 (HTML e CSS puros, sem framework de front), SQLAlchemy 2 com SQL escrito à mão, SQLite e PostgreSQL (Supabase), httpx, pydantic-settings, SDK da Anthropic (assistente), pytest (407 testes no CI, com os testes de banco nos dois bancos), ruff e GitHub Actions (CI e coleta agendada).
+
 ## Como rodar
 
-**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando. Falta o site no ar.
+**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando; assistente de perguntas na linha de comando. Falta o site no ar.
 
 ```bash
 python -m venv .venv
@@ -49,6 +81,7 @@ ruff check . && ruff format --check .      # lint
 - Sem consulta em lote.
 - Sem integração com Portal da Transparência.
 - Hospedagem gratuita hiberna: a primeira visita depois de um tempo ocioso pode levar cerca de 1 minuto (cold start).
+- O assistente só existe na linha de comando e precisa de `ANTHROPIC_API_KEY`. Foi testado com um cliente falso e com o SDK real sobre rede simulada, mas ainda não contra a API de verdade.
 - Em repositório público, o GitHub desativa agendamentos depois de 60 dias sem atividade no repositório. Se isso acontecer, a coleta diária precisa ser reativada na aba Actions.
 
 ## Licença
