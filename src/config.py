@@ -26,10 +26,14 @@ class Settings(BaseSettings):
     http_timeout_segundos: int = Field(default=8, gt=0)
     database_url: str = "sqlite:///./dados/consulta_cnpj.db"
 
-    # Assistente: sem chave, ele fica desligado e o resto funciona igual.
-    # SecretStr mascara a chave em log e mensagem de erro.
+    # Assistente: sem chave, ele fica desligado e o resto funciona igual. Com a
+    # chave da Anthropic, usa o Claude; senão, com a do OpenRouter, um modelo
+    # grátis. SecretStr mascara a chave em log e mensagem de erro.
     anthropic_api_key: SecretStr | None = None
     assistente_modelo: str = "claude-opus-5-5"
+    openrouter_api_key: SecretStr | None = None
+    # Só modelos terminados em ":free", que chamem ferramentas.
+    assistente_modelo_openrouter: str = "nvidia/nemotron-3.5-super-vl:free"
     # Cada pergunta custa dinheiro e o site não tem login: o limite protege a conta.
     assistente_limite_diario: int = Field(default=20, gt=0)
 
