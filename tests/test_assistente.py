@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import anthropic
+import httpx
 import httpx2
 import pytest
 from sqlalchemy import Engine, text
@@ -21,14 +22,19 @@ from src.assistente import (
     MAXIMO_DE_CHAMADAS,
     MENSAGEM_RECUSA,
     MENSAGEM_SEM_CONCLUSAO,
+    SISTEMA,
     TAMANHO_MAXIMO_DA_PERGUNTA,
     AssistenteIndisponivel,
+    OpenRouter,
     buscar_empresas,
+    criar_cliente,
     listar_acompanhadas,
     mudancas_desde,
     perguntar,
     ver_empresa,
 )
+from src.config import Settings
+from src.openrouter import ErroOpenRouter
 from src.repo import (
     inserir_empresa_se_nao_existe,
     inserir_observacao,
@@ -36,7 +42,15 @@ from src.repo import (
     registrar_pergunta,
 )
 from src.servico import RegraDeNegocio
-from tests.falsos import ClienteIAFalso, resposta_ferramentas, resposta_recusa, resposta_texto
+from tests.falsos import (
+    ClienteIAFalso,
+    OpenRouterFalso,
+    openrouter_ferramentas,
+    openrouter_texto,
+    resposta_ferramentas,
+    resposta_recusa,
+    resposta_texto,
+)
 
 CNPJ = "11222333000181"
 OUTRO_CNPJ = "11444777000161"
@@ -432,3 +446,146 @@ class TestMudancasDesde:
     def test_data_invalida_e_erro(self, motor: Engine) -> None:
         with pytest.raises(RegraDeNegocio, match="AAAA-MM-DD"):
             mudancas_desde(motor, agora=AGORA, data="01/10/2026")
+
+
+def _perguntar_openrouter(
+    motor: Engine, modelo_falso: OpenRouterFalso, texto: str = "Como está a ACME?"
+) -> str:
+    return perguntar(
+        texto,
+        motor=motor,
+        cliente=OpenRouter(modelo_falso),
+        modelo="modelo/teste:free",
+        limite_diario=20,
+        agora=AGORA,
+    ).texto
+
+
+def _mensagens_de_ferramenta(pedido: dict[str, Any]) -> list[dict[str, Any]]:
+    return [m for m in pedido["messages"] if m["role"] == "tool"]
+
+
+class TestOpenRouter:
+    """O mesmo assistente com um modelo grátis do OpenRouter, no formato da OpenAI."""
+
+    def test_resposta_direta_e_registro(self, motor: Engine) -> None:
+        modelo = OpenRouterFalso(openrouter_texto("Só respondo sobre as empresas do site."))
+
+        texto = _perguntar_openrouter(motor, modelo)
+
+        assert texto == "Só respondo sobre as empresas do site."
+        [registro] = _perguntas_gravadas(motor)
+        assert registro["modelo"] == "modelo/teste:free"
+        assert registro["desfecho"] == "respondida"
+        assert (registro["chamadas"], registro["tokens_entrada"], registro["tokens_saida"]) == (
+            1,
+            100,
+            20,
+        )
+
+    def test_pedido_leva_sistema_ferramentas_e_a_data(self, motor: Engine) -> None:
+        modelo = OpenRouterFalso(openrouter_texto("Oi."))
+
+        _perguntar_openrouter(motor, modelo)
+
+        [pedido] = modelo.pedidos
+        assert pedido["model"] == "modelo/teste:free"
+        assert pedido["messages"][0] == {"role": "system", "content": SISTEMA}
+        assert "2026-11-12" in pedido["messages"][1]["content"]
+        nomes = {f["function"]["name"] for f in pedido["tools"]}
+        assert nomes == {d["name"] for d in DEFINICOES}
+
+    def test_executa_a_ferramenta_e_devolve_como_mensagem_tool(self, motor: Engine) -> None:
+        _gravar(motor, CNPJ, ONTEM, razao_social="ACME LTDA")
+        modelo = OpenRouterFalso(
+            openrouter_ferramentas(("ver_empresa", {"cnpj": CNPJ})),
+            openrouter_texto("A ACME LTDA está ativa."),
+        )
+
+        assert _perguntar_openrouter(motor, modelo) == "A ACME LTDA está ativa."
+
+        segundo = modelo.pedidos[1]
+        assert segundo["messages"][2]["role"] == "assistant"
+        assert segundo["messages"][2]["tool_calls"][0]["id"] == "call_1"
+        [resultado] = _mensagens_de_ferramenta(segundo)
+        assert resultado["tool_call_id"] == "call_1"
+        assert json.loads(resultado["content"])["razao_social"] == "ACME LTDA"
+
+    def test_cnpj_que_vem_como_numero_e_aceito(self, motor: Engine) -> None:
+        _gravar(motor, CNPJ, ONTEM)
+        modelo = OpenRouterFalso(
+            openrouter_ferramentas(("ver_empresa", {"cnpj": int(CNPJ)})),
+            openrouter_texto("Ativa."),
+        )
+
+        _perguntar_openrouter(motor, modelo)
+
+        [resultado] = _mensagens_de_ferramenta(modelo.pedidos[1])
+        assert json.loads(resultado["content"])["encontrada"] is True
+
+    @pytest.mark.parametrize(
+        "argumentos",
+        ['{"cnpj": ', {"documento": CNPJ}, {}],
+        ids=["json-malformado", "parametro-errado", "parametro-faltando"],
+    )
+    def test_parametros_invalidos_voltam_como_erro(
+        self, motor: Engine, argumentos: dict[str, Any] | str
+    ) -> None:
+        modelo = OpenRouterFalso(
+            openrouter_ferramentas(("ver_empresa", argumentos)),
+            openrouter_texto("Não consegui."),
+        )
+
+        _perguntar_openrouter(motor, modelo)
+
+        [resultado] = _mensagens_de_ferramenta(modelo.pedidos[1])
+        assert resultado["content"].startswith("Erro: Parâmetros inválidos")
+
+    def test_resposta_cortada_nao_e_entregue(self, motor: Engine) -> None:
+        modelo = OpenRouterFalso(openrouter_texto("A ACME está", finish_reason="length"))
+
+        assert _perguntar_openrouter(motor, modelo) == MENSAGEM_SEM_CONCLUSAO
+
+    def test_recusa_vira_mensagem_pronta(self, motor: Engine) -> None:
+        recusa = openrouter_texto("")
+        recusa["choices"][0]["message"]["refusal"] = "Não posso ajudar com isso."
+        modelo = OpenRouterFalso(recusa)
+
+        assert _perguntar_openrouter(motor, modelo) == MENSAGEM_RECUSA
+
+    def test_falha_do_openrouter_levanta_indisponivel_com_a_mensagem(self, motor: Engine) -> None:
+        modelo = OpenRouterFalso(ErroOpenRouter("O modelo está sobrecarregado no fornecedor."))
+
+        with pytest.raises(AssistenteIndisponivel, match="sobrecarregado"):
+            _perguntar_openrouter(motor, modelo)
+
+        assert _perguntas_gravadas(motor)[0]["desfecho"] == "erro"
+
+
+class TestCriarCliente:
+    def _config(self, **chaves: str) -> Settings:
+        # Sem chave nenhuma por padrão: o .env ou o ambiente de quem roda não interferem.
+        valores: dict[str, Any] = {"anthropic_api_key": None, "openrouter_api_key": None}
+        return Settings(_env_file=None, **{**valores, **chaves})  # type: ignore[call-arg]
+
+    def test_sem_chave_fica_desligado(self) -> None:
+        with httpx.Client() as http:
+            assert criar_cliente(self._config(), http=http) is None
+
+    def test_so_com_openrouter_usa_o_modelo_gratis(self) -> None:
+        config = self._config(openrouter_api_key="sk-or-teste")
+
+        with httpx.Client() as http:
+            cliente, modelo = criar_cliente(config, http=http)  # type: ignore[misc]
+
+        assert isinstance(cliente, OpenRouter)
+        assert modelo == config.assistente_modelo_openrouter
+
+    def test_com_as_duas_chaves_prefere_o_claude(self) -> None:
+        config = self._config(anthropic_api_key="sk-ant-teste", openrouter_api_key="sk-or-teste")
+
+        with httpx.Client() as http:
+            cliente, modelo = criar_cliente(config, http=http)  # type: ignore[misc]
+
+        assert isinstance(cliente, anthropic.Anthropic)
+        assert modelo == config.assistente_modelo
