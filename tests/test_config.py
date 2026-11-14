@@ -99,7 +99,13 @@ class TestAssistente:
     def test_desligado_e_com_padroes_quando_nada_foi_definido(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        for var in ("ANTHROPIC_API_KEY", "ASSISTENTE_MODELO", "ASSISTENTE_LIMITE_DIARIO"):
+        for var in (
+            "ANTHROPIC_API_KEY",
+            "ASSISTENTE_MODELO",
+            "ASSISTENTE_LIMITE_DIARIO",
+            "OPENROUTER_API_KEY",
+            "ASSISTENTE_MODELO_OPENROUTER",
+        ):
             monkeypatch.delenv(var, raising=False)
 
         settings = _settings_sem_env_file()
@@ -107,6 +113,8 @@ class TestAssistente:
         assert settings.anthropic_api_key is None
         assert settings.assistente_modelo == "claude-opus-5-5"
         assert settings.assistente_limite_diario == 20
+        assert settings.openrouter_api_key is None
+        assert settings.assistente_modelo_openrouter.endswith(":free")
 
     def test_le_a_chave_do_ambiente_sem_expor_o_valor(
         self, monkeypatch: pytest.MonkeyPatch
@@ -127,3 +135,14 @@ class TestAssistente:
 
         with pytest.raises(ValidationError):
             _settings_sem_env_file()
+
+    def test_le_a_chave_do_openrouter_sem_expor_o_valor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-secreta")
+
+        settings = _settings_sem_env_file()
+
+        assert settings.openrouter_api_key is not None
+        assert settings.openrouter_api_key.get_secret_value() == "sk-or-secreta"
+        assert "sk-or-secreta" not in repr(settings)
