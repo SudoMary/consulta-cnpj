@@ -180,9 +180,7 @@ def perguntar(
     """
     texto = _validar(pergunta)
     agora = agora or datetime.now(UTC)
-    with motor.connect() as con:
-        feitas = repo.perguntas_desde(con, _inicio_em_utc(_hoje_em_brasilia(agora)))
-    if feitas >= limite_diario:
+    if perguntas_restantes(motor, limite_diario=limite_diario, agora=agora) <= 0:
         raise RegraDeNegocio(
             f"O assistente já respondeu {limite_diario} perguntas hoje, o limite diário. "
             "Tente de novo amanhã."
@@ -211,6 +209,14 @@ def perguntar(
         raise AssistenteIndisponivel(mensagem) from erro
     _registrar(motor, agora, texto, modelo, desfecho, gasto)
     return Resposta(resposta)
+
+
+def perguntas_restantes(motor: Engine, *, limite_diario: int, agora: datetime | None = None) -> int:
+    """Quantas perguntas ainda cabem hoje, no dia de Brasília."""
+    agora = agora or datetime.now(UTC)
+    with motor.connect() as con:
+        feitas = repo.perguntas_desde(con, _inicio_em_utc(_hoje_em_brasilia(agora)))
+    return max(limite_diario - feitas, 0)
 
 
 def _conversar(
