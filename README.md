@@ -1,5 +1,7 @@
 # Consulta de CNPJ com histórico
 
+**No ar:** [consulta-cnpj-pfpj.onrender.com](https://consulta-cnpj-pfpj.onrender.com) (plano grátis: o primeiro acesso depois de um tempo parado leva cerca de 1 minuto).
+
 [![CI](https://github.com/SudoMary/consulta-cnpj/actions/workflows/ci.yml/badge.svg)](https://github.com/SudoMary/consulta-cnpj/actions/workflows/ci.yml)
 
 > Recebe um CNPJ, busca os dados cadastrais em API pública, guarda cada consulta e mostra o que mudou entre elas.
@@ -47,7 +49,7 @@ Cada camada recebe de fora o que depende do mundo (banco, rede, relógio, API do
 
 ## Como rodar
 
-**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando; assistente de perguntas no site e na linha de comando, com um modelo grátis. Site no ar em https://consulta-cnpj-pfpj.onrender.com.
+**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando; assistente de perguntas no site e na linha de comando, com um modelo grátis. Site no ar (link no topo).
 
 ```bash
 python -m venv .venv
@@ -68,7 +70,7 @@ ruff check . && ruff format --check .      # lint
 
 ## Publicação
 
-O site roda no Render, plano grátis, a partir do [`render.yaml`](render.yaml): no painel do Render, New → Blueprint → este repositório. A única variável a preencher é `DATABASE_URL`, a connection string do Supabase no modo "Session pooler". O banco fica no Supabase porque o Render grátis apaga os arquivos quando o serviço dorme.
+O site roda no Render como Web Service do plano grátis, com a configuração descrita no [`render.yaml`](render.yaml): build com `pip install -r requirements.txt`, início com `uvicorn src.app:app --host 0.0.0.0 --port $PORT`, health check em `/saude` e as variáveis `DATABASE_URL` (connection string do Supabase no modo "Session pooler"), `OPENROUTER_API_KEY` (assistente) e `PYTHON_VERSION`. O banco fica no Supabase porque o Render grátis apaga os arquivos quando o serviço dorme.
 
 ## Decisões de projeto
 
@@ -87,6 +89,7 @@ O site roda no Render, plano grátis, a partir do [`render.yaml`](render.yaml): 
 - Sem integração com Portal da Transparência.
 - Hospedagem gratuita hiberna: a primeira visita depois de um tempo ocioso pode levar cerca de 1 minuto (cold start).
 - O assistente fica em `/assistente` e na linha de comando. Com o modelo grátis do OpenRouter, foi testado de verdade (resposta certa em 2 chamadas, cerca de 12 s). Com o Claude, só com cliente falso e com o SDK real sobre rede simulada. O modelo grátis às vezes fica sobrecarregado no fornecedor: o sistema tenta de novo e, se não der, avisa.
+- O banco de produção ainda não tem empresa com mudança detectada: a coleta diária acompanha as empresas e a linha do tempo aparece quando a Receita registrar uma mudança. Não há histórico inventado para demonstração.
 - Em repositório público, o GitHub desativa agendamentos depois de 60 dias sem atividade no repositório. Se isso acontecer, a coleta diária precisa ser reativada na aba Actions.
 
 ## Licença
