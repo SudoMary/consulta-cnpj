@@ -249,3 +249,32 @@ class TestPerguntar:
 
         assert codigo == 1
         assert "fora do ar" in capsys.readouterr().err
+
+
+def test_perguntar_com_o_openrouter_pela_rede_falsa(
+    banco: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-teste")
+    monkeypatch.setattr("src.cli.Settings", partial(Settings, _env_file=None))
+    pedidos: list[httpx.Request] = []
+
+    def openrouter(pedido: httpx.Request) -> httpx.Response:
+        pedidos.append(pedido)
+        assert pedido.url.host == "openrouter.ai"
+        corpo = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Nenhuma empresa mudou."},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        return httpx.Response(200, json=corpo)
+
+    codigo = main(["perguntar", "O que mudou?"], transporte=httpx.MockTransport(openrouter))
+
+    assert codigo == 0
+    assert capsys.readouterr().out.strip() == "Nenhuma empresa mudou."
+    assert pedidos[0].headers["Authorization"] == "Bearer sk-or-teste"
