@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from .assistente import TAMANHO_MAXIMO_DA_PERGUNTA
 from .formatacao import (
     NAO_INFORMADO,
     ROTULOS,
@@ -192,3 +193,38 @@ def _socios(quantidade: int | None) -> str:
     if quantidade == 0:
         return "Nenhum sócio informado"
     return "1 sócio" if quantidade == 1 else f"{quantidade} sócios"
+
+
+EXEMPLOS_DO_ASSISTENTE = (
+    "Quais empresas estão sendo acompanhadas?",
+    "Alguma empresa acompanhada mudou de situação este mês?",
+    "O que mudou nas empresas nos últimos 30 dias?",
+)
+
+
+def pagina_do_assistente(
+    *,
+    modelo: str | None,
+    restantes: int,
+    pergunta: str = "",
+    resposta: str | None = None,
+    erro: str | None = None,
+) -> dict[str, Any]:
+    """Conteúdo da página do assistente. Sem `modelo`, ele está desligado."""
+    if restantes == 1:
+        quantas = "Resta 1 pergunta hoje."
+    elif restantes:
+        quantas = f"Restam {restantes} perguntas hoje."
+    else:
+        quantas = "As perguntas de hoje acabaram; amanhã tem mais."
+    return {
+        "ligado": modelo is not None,
+        "modelo": modelo,
+        "restantes": restantes,
+        "quantas": quantas,
+        "exemplos": EXEMPLOS_DO_ASSISTENTE,
+        "tamanho_maximo": TAMANHO_MAXIMO_DA_PERGUNTA,
+        "pergunta": pergunta,
+        "resposta": resposta,
+        "erro": erro,
+    }

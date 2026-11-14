@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% import "icones.html" as icones %}
+{% block titulo %}Assistente · Consulta CNPJ{% endblock %}
+{% block conteudo %}
+<section class="assistente" aria-labelledby="titulo-assistente">
+  <h1 class="titulo" id="titulo-assistente">Pergunte sobre as empresas</h1>
+  <p class="sub">Um modelo de IA responde consultando só o banco deste site: as empresas já consultadas, as acompanhadas e o que mudou nelas.</p>
+
+  {% if p.ligado %}
+  <form class="pergunta-form" id="form-assistente" action="/assistente" method="post" data-assistente>
+    <label for="campo-pergunta">Sua pergunta</label>
+    <textarea id="campo-pergunta" name="pergunta" rows="3" maxlength="{{ p.tamanho_maximo }}" required
+              placeholder="Ex.: alguma empresa acompanhada mudou de situação este mês?">{{ p.pergunta }}</textarea>
+    <div class="pergunta-linha">
+      <button class="botao" type="submit">Perguntar</button>
+      <p class="dica" id="dica-assistente" role="status" aria-live="polite">{{ p.quantas }}</p>
+    </div>
+  </form>
+
+  <div class="exemplos">
+    <p class="dica">Ou clique num exemplo:</p>
+    <form class="exemplos-lista" action="/assistente" method="post" data-assistente>
+      {% for exemplo in p.exemplos %}
+      <button class="exemplo" type="submit" name="pergunta" value="{{ exemplo }}">{{ exemplo }}</button>
+      {% endfor %}
+    </form>
+  </div>
+  {% else %}
+  <div class="aviso" role="status">
+    {{ icones.aviso() }}
+    <p><strong>O assistente está desligado neste ambiente.</strong> Ele precisa da chave de um modelo de IA para funcionar; o resto do site funciona normalmente.</p>
+  </div>
+  {% endif %}
+
+  {% if p.erro %}
+  <div class="aviso" role="alert">
+    {{ icones.aviso() }}
+    <p>{{ p.erro }}</p>
+  </div>
+  {% endif %}
+
+  {% if p.resposta %}
+  <article class="resposta" aria-labelledby="titulo-resposta">
+    <h2 class="bloco-titulo" id="titulo-resposta">Resposta</h2>
+    <p class="resposta-pergunta">{{ p.pergunta }}</p>
+    <div class="resposta-texto">{{ p.resposta }}</div>
+  </article>
+  {% endif %}
+
+  {% if p.ligado %}
+  <p class="dica">Respostas geradas por IA ({{ p.modelo }}) com os dados deste site: confira na ficha da empresa antes de decidir algo. As perguntas ficam registradas para medir uso.</p>
+  {% endif %}
+</section>
+{% endblock %}
