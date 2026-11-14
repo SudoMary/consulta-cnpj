@@ -107,6 +107,23 @@
     });
   }
 
+  // Assistente: o modelo pode levar até um minuto. Enquanto isso, a página diz
+  // que está trabalhando e trava os botões, para ninguém mandar a mesma pergunta
+  // duas vezes. Os botões travam depois do envio: travados antes, o exemplo
+  // clicado não iria junto com o formulário.
+  var formsAssistente = document.querySelectorAll("form[data-assistente]");
+  var dicaAssistente = document.getElementById("dica-assistente");
+  formsAssistente.forEach(function (form) {
+    form.addEventListener("submit", function () {
+      if (dicaAssistente) dicaAssistente.textContent = "Consultando o banco... pode levar até 1 minuto.";
+      setTimeout(function () {
+        document.querySelectorAll("form[data-assistente] button").forEach(function (botao) {
+          botao.disabled = true;
+        });
+      }, 0);
+    });
+  });
+
   // Copiar o CNPJ, quando o navegador permite.
   var botoesCopiar = document.querySelectorAll("[data-copiar]");
   if (navigator.clipboard) {
