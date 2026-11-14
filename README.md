@@ -41,13 +41,13 @@ Cada camada recebe de fora o que depende do mundo (banco, rede, relógio, API do
 | `src/coletor.py` | Recoleta diária idempotente: rodar duas vezes no mesmo dia não duplica nada. |
 | `src/assistente.py` | Um LLM responde usando quatro ferramentas que só leem o banco: o Claude, com chave da Anthropic, ou um modelo grátis do OpenRouter. Limite diário e registro de tokens por pergunta. |
 | `src/openrouter.py` | Cliente da API do OpenRouter: tenta de novo quando o modelo grátis está sobrecarregado no fornecedor e para na hora quando a cota do dia acaba. |
-| `src/app.py`, `src/telas.py`, `src/formatacao.py` | Busca, ficha da empresa com linha do tempo das mudanças e painel das acompanhadas. |
+| `src/app.py`, `src/telas.py`, `src/formatacao.py` | Busca, ficha da empresa com linha do tempo das mudanças, painel das acompanhadas e página do assistente. |
 
 **Stack:** Python 3.12, FastAPI e Jinja2 (HTML e CSS puros, sem framework de front), SQLAlchemy 2 com SQL escrito à mão, SQLite e PostgreSQL (Supabase), httpx, pydantic-settings, SDK da Anthropic ou API do OpenRouter com o modelo grátis Nemotron 3.5 Super, da NVIDIA (assistente), pytest (438 testes no CI, com os testes de banco nos dois bancos), ruff e GitHub Actions (CI e coleta agendada).
 
 ## Como rodar
 
-**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando; assistente de perguntas na linha de comando, com um modelo grátis. Falta o site no ar.
+**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando; assistente de perguntas no site e na linha de comando, com um modelo grátis. Site no ar em https://consulta-cnpj-pfpj.onrender.com.
 
 ```bash
 python -m venv .venv
@@ -86,7 +86,7 @@ O site roda no Render, plano grátis, a partir do [`render.yaml`](render.yaml): 
 - Sem consulta em lote.
 - Sem integração com Portal da Transparência.
 - Hospedagem gratuita hiberna: a primeira visita depois de um tempo ocioso pode levar cerca de 1 minuto (cold start).
-- O assistente só existe na linha de comando. Com o modelo grátis do OpenRouter, foi testado de verdade (resposta certa em 2 chamadas, cerca de 12 s). Com o Claude, só com cliente falso e com o SDK real sobre rede simulada. O modelo grátis às vezes fica sobrecarregado no fornecedor: o sistema tenta de novo e, se não der, avisa.
+- O assistente fica em `/assistente` e na linha de comando. Com o modelo grátis do OpenRouter, foi testado de verdade (resposta certa em 2 chamadas, cerca de 12 s). Com o Claude, só com cliente falso e com o SDK real sobre rede simulada. O modelo grátis às vezes fica sobrecarregado no fornecedor: o sistema tenta de novo e, se não der, avisa.
 - Em repositório público, o GitHub desativa agendamentos depois de 60 dias sem atividade no repositório. Se isso acontecer, a coleta diária precisa ser reativada na aba Actions.
 
 ## Licença
