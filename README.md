@@ -18,7 +18,7 @@ Consultar é fácil — existe API pública para isso. O que não existe pronto 
  entradas      src/app.py         site (FastAPI + HTML montado no servidor, modo escuro)
                src/cli.py         linha de comando: consultar, acompanhar, perguntar
                src/coletor.py     coleta diária das empresas acompanhadas (GitHub Actions)
-               src/assistente.py  perguntas em português, respondidas pelo Claude
+               src/assistente.py  perguntas em português, respondidas por um LLM
                    │
  regras        src/servico.py     valida o CNPJ, usa o cache, grava a observação, detecta mudança
                    │
@@ -39,14 +39,15 @@ Cada camada recebe de fora o que depende do mundo (banco, rede, relógio, API do
 | `src/servico.py` | Cache de 24 horas, gravação append-only numa transação, detecção de mudança nos campos que importam e o painel das acompanhadas. |
 | `src/repo.py` + `schema.sql` | Tabelas `empresa`, `observacao` (histórico, nunca alterado), `falha_coleta` e `pergunta`. O mesmo SQL roda nos dois bancos. |
 | `src/coletor.py` | Recoleta diária idempotente: rodar duas vezes no mesmo dia não duplica nada. |
-| `src/assistente.py` | O Claude responde usando quatro ferramentas que só leem o banco; limite diário e registro de tokens por pergunta. |
+| `src/assistente.py` | Um LLM responde usando quatro ferramentas que só leem o banco: o Claude, com chave da Anthropic, ou um modelo grátis do OpenRouter. Limite diário e registro de tokens por pergunta. |
+| `src/openrouter.py` | Cliente da API do OpenRouter: tenta de novo quando o modelo grátis está sobrecarregado no fornecedor e para na hora quando a cota do dia acaba. |
 | `src/app.py`, `src/telas.py`, `src/formatacao.py` | Busca, ficha da empresa com linha do tempo das mudanças e painel das acompanhadas. |
 
-**Stack:** Python 3.12, FastAPI e Jinja2 (HTML e CSS puros, sem framework de front), SQLAlchemy 2 com SQL escrito à mão, SQLite e PostgreSQL (Supabase), httpx, pydantic-settings, SDK da Anthropic (assistente), pytest (407 testes no CI, com os testes de banco nos dois bancos), ruff e GitHub Actions (CI e coleta agendada).
+**Stack:** Python 3.12, FastAPI e Jinja2 (HTML e CSS puros, sem framework de front), SQLAlchemy 2 com SQL escrito à mão, SQLite e PostgreSQL (Supabase), httpx, pydantic-settings, SDK da Anthropic ou API do OpenRouter com o modelo grátis Nemotron 3.5 Super, da NVIDIA (assistente), pytest (438 testes no CI, com os testes de banco nos dois bancos), ruff e GitHub Actions (CI e coleta agendada).
 
 ## Como rodar
 
-**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando; assistente de perguntas na linha de comando. Falta o site no ar.
+**Estado:** consulta, histórico, detecção de mudança e coleta diária prontos, na tela web e na linha de comando; assistente de perguntas na linha de comando, com um modelo grátis. Falta o site no ar.
 
 ```bash
 python -m venv .venv
@@ -59,7 +60,7 @@ python -m src.cli consultar 11.222.333/0001-81             # usa o cache de 24 h
 python -m src.cli consultar 11.222.333/0001-81 --forcar    # ignora o cache
 python -m src.cli acompanhar 11.222.333/0001-81            # entra na coleta diária
 python -m src.coletor                                      # roda a coleta diária
-python -m src.cli perguntar "O que mudou este mês?"        # assistente (precisa de chave)
+python -m src.cli perguntar "O que mudou este mês?"        # assistente (chave grátis do OpenRouter no .env)
 
 pytest -q                                  # testes
 ruff check . && ruff format --check .      # lint
@@ -72,7 +73,7 @@ ruff check . && ruff format --check .      # lint
 - **Duas fontes com fallback.** BrasilAPI como primária, Minha Receita como reserva. API pública cai; sem plano B o sistema cai junto.
 - **Timeout + backoff + degradação.** Toda chamada externa tem timeout; erro de rede é tentado de novo com espera crescente; se tudo falhar e houver dado antigo, entrega o antigo com aviso em vez de tela de erro.
 - **Coleta agendada no GitHub Actions.** Hospedagem gratuita hiberna; cron dentro dela não dispara. O histórico de execuções fica visível na aba Actions do repositório. A coleta é idempotente por dia: rodar duas vezes no mesmo dia não duplica observação. Para acompanhar uma empresa em produção: aba Actions → coleta → Run workflow, informando o CNPJ.
-- **Assistente que só lê o banco.** Perguntas em português ("quais empresas mudaram este mês?") são respondidas pelo Claude, que consulta o banco por ferramentas: listar as acompanhadas, buscar por nome, ver uma empresa e listar mudanças desde uma data. Nenhuma ferramenta chama a BrasilAPI ou grava dado, e o modelo responde só com o que elas devolveram. Cada pergunta fica registrada com os tokens gastos; um limite diário, o tamanho máximo da pergunta e o máximo de 6 chamadas por pergunta seguram o custo. Sem `ANTHROPIC_API_KEY`, o assistente fica desligado e o resto funciona igual. Nos testes, a API é um cliente falso: nenhum teste chama o modelo nem gasta dinheiro.
+- **Assistente que só lê o banco.** Perguntas em português ("quais empresas mudaram este mês?") são respondidas por um LLM, que consulta o banco por ferramentas: listar as acompanhadas, buscar por nome, ver uma empresa e listar mudanças desde uma data. Nenhuma ferramenta chama a BrasilAPI ou grava dado, e o modelo responde só com o que elas devolveram. Cada pergunta fica registrada com os tokens gastos; um limite diário, o tamanho máximo da pergunta e o máximo de 6 chamadas por pergunta seguram o custo. O modelo é o Claude, com `ANTHROPIC_API_KEY`, ou um modelo grátis do OpenRouter, com `OPENROUTER_API_KEY` (grátis, 50 requisições por dia); as ferramentas são as mesmas e o código confere os parâmetros antes de rodar, porque nem toda API garante o esquema. Sem nenhuma das chaves, o assistente fica desligado e o resto funciona igual. Nos testes, as duas APIs são falsas: nenhum teste chama o modelo nem gasta dinheiro.
 - **SQLite no desenvolvimento, PostgreSQL em produção.** A hospedagem gratuita apaga os arquivos locais ao hibernar, então o banco de produção fica no Supabase. O mesmo SQL roda nos dois: os testes passam sem conexão no SQLite, e o CI roda os testes de banco também num PostgreSQL de verdade.
 
 ## Limitações conhecidas (v1)
@@ -81,7 +82,7 @@ ruff check . && ruff format --check .      # lint
 - Sem consulta em lote.
 - Sem integração com Portal da Transparência.
 - Hospedagem gratuita hiberna: a primeira visita depois de um tempo ocioso pode levar cerca de 1 minuto (cold start).
-- O assistente só existe na linha de comando e precisa de `ANTHROPIC_API_KEY`. Foi testado com um cliente falso e com o SDK real sobre rede simulada, mas ainda não contra a API de verdade.
+- O assistente só existe na linha de comando. Com o modelo grátis do OpenRouter, foi testado de verdade (resposta certa em 2 chamadas, cerca de 12 s). Com o Claude, só com cliente falso e com o SDK real sobre rede simulada. O modelo grátis às vezes fica sobrecarregado no fornecedor: o sistema tenta de novo e, se não der, avisa.
 - Em repositório público, o GitHub desativa agendamentos depois de 60 dias sem atividade no repositório. Se isso acontecer, a coleta diária precisa ser reativada na aba Actions.
 
 ## Licença
