@@ -1,0 +1,19 @@
+# Blueprint do Render: descreve o serviço para o Render criar sozinho.
+# No painel: New > Blueprint > este repositório. O Render pede só o DATABASE_URL.
+services:
+  - type: web
+    name: consulta-cnpj
+    runtime: python
+    plan: free
+    # Mesma região do banco no Supabase (us-west-2), para a consulta ao banco ser rápida.
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /saude
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      # Connection string do Supabase no modo "Session pooler" (IPv4, porta 5432).
+      # É segredo: preenchida no painel do Render, nunca neste arquivo.
+      - key: DATABASE_URL
+        sync: false
