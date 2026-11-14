@@ -66,6 +66,10 @@ pytest -q                                  # testes
 ruff check . && ruff format --check .      # lint
 ```
 
+## Publicação
+
+O site roda no Render, plano grátis, a partir do [`render.yaml`](render.yaml): no painel do Render, New → Blueprint → este repositório. A única variável a preencher é `DATABASE_URL`, a connection string do Supabase no modo "Session pooler". O banco fica no Supabase porque o Render grátis apaga os arquivos quando o serviço dorme.
+
 ## Decisões de projeto
 
 - **Append-only.** Cada consulta é uma observação nova; nunca `UPDATE` no registro anterior. A situação atual é estado derivado da observação mais recente. É o que permite responder *quando* a empresa mudou.
