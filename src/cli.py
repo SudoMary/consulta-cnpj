@@ -38,26 +38,31 @@ def main(
     """Executa o comando e devolve o código de saída do processo.
 
     `transporte` e `cliente_ia` existem para os testes trocarem a rede e a API
-    do Claude por falsas.
+    do Claude por falsas. O OpenRouter passa pelo mesmo `transporte`.
     """
     args = _interpretar(argumentos)
     config = Settings()
     motor = criar_motor(config.url_banco)
     try:
-        if args.comando == "perguntar":
-            cliente = cliente_ia or criar_cliente(config)
-            if cliente is None:
-                return _falhar(MENSAGEM_SEM_CHAVE)
-            resposta = perguntar(
-                args.pergunta,
-                motor=motor,
-                cliente=cliente,
-                modelo=config.assistente_modelo,
-                limite_diario=config.assistente_limite_diario,
-            )
-            print(resposta.texto)
-            return 0
         with httpx.Client(transport=transporte) as http:
+            if args.comando == "perguntar":
+                escolhido = (
+                    (cliente_ia, config.assistente_modelo)
+                    if cliente_ia is not None
+                    else criar_cliente(config, http=http)
+                )
+                if escolhido is None:
+                    return _falhar(MENSAGEM_SEM_CHAVE)
+                cliente, modelo = escolhido
+                resposta = perguntar(
+                    args.pergunta,
+                    motor=motor,
+                    cliente=cliente,
+                    modelo=modelo,
+                    limite_diario=config.assistente_limite_diario,
+                )
+                print(resposta.texto)
+                return 0
             coletar = partial(consultar_externo, http=http, config=config)
             if args.comando == "acompanhar":
                 consulta = acompanhar(
