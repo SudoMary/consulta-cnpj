@@ -248,3 +248,124 @@ class TestPainel:
         cliente.post(f"/empresa/{CNPJ}/acompanhar")
 
         assert "Ver todas (1)" in cliente.get("/").text
+
+
+class ModeloNaRede:
+    """Responde como o OpenRouter, com o texto escolhido, e conta as chamadas."""
+
+    def __init__(self) -> None:
+        self.conteudo = "Nenhuma empresa mudou."
+        self.status = 200
+        self.chamadas = 0
+
+    def __call__(self, pedido: httpx.Request) -> httpx.Response:
+        self.chamadas += 1
+        if self.status != 200:
+            return httpx.Response(self.status, json={"error": {"message": "Rate limit"}})
+        corpo = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": self.conteudo},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        return httpx.Response(200, json=corpo)
+
+
+@pytest.fixture
+def modelo() -> ModeloNaRede:
+    return ModeloNaRede()
+
+
+def _cliente_web(banco: str, rede: Rede, modelo: ModeloNaRede, chave: str | None) -> TestClient:
+    def responder(pedido: httpx.Request) -> httpx.Response:
+        return modelo(pedido) if pedido.url.host == "openrouter.ai" else rede(pedido)
+
+    config = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        database_url=banco,
+        brasilapi_base_url="https://primaria.exemplo/api",
+        minhareceita_base_url="https://reserva.exemplo",
+        anthropic_api_key=None,
+        openrouter_api_key=chave,
+    )
+    return TestClient(criar_app(config, transporte=httpx.MockTransport(responder)))
+
+
+@pytest.fixture
+def com_assistente(banco_web: str, rede: Rede, modelo: ModeloNaRede) -> Iterator[TestClient]:
+    with _cliente_web(banco_web, rede, modelo, "sk-or-teste") as c:
+        yield c
+
+
+@pytest.fixture
+def sem_assistente(banco_web: str, rede: Rede, modelo: ModeloNaRede) -> Iterator[TestClient]:
+    with _cliente_web(banco_web, rede, modelo, None) as c:
+        yield c
+
+
+class TestAssistente:
+    def test_menu_leva_ao_assistente(self, com_assistente: TestClient) -> None:
+        assert 'href="/assistente"' in com_assistente.get("/").text
+
+    def test_pagina_tem_formulario_exemplos_e_perguntas_restantes(
+        self, com_assistente: TestClient
+    ) -> None:
+        resposta = com_assistente.get("/assistente")
+
+        assert resposta.status_code == 200
+        assert 'name="pergunta"' in resposta.text
+        assert "Quais empresas estão sendo acompanhadas?" in resposta.text
+        assert "Restam 20 perguntas hoje." in resposta.text
+
+    def test_pergunta_mostra_a_resposta_e_desconta_do_dia(
+        self, com_assistente: TestClient, modelo: ModeloNaRede
+    ) -> None:
+        resposta = com_assistente.post("/assistente", data={"pergunta": "O que mudou?"})
+
+        assert resposta.status_code == 200
+        assert "Nenhuma empresa mudou." in resposta.text
+        assert "O que mudou?" in resposta.text
+        assert "Restam 19 perguntas hoje." in resposta.text
+        assert modelo.chamadas == 1
+
+    def test_texto_do_modelo_e_escapado(
+        self, com_assistente: TestClient, modelo: ModeloNaRede
+    ) -> None:
+        modelo.conteudo = "<script>alert(1)</script>"
+
+        texto = com_assistente.post("/assistente", data={"pergunta": "Oi"}).text
+
+        assert "<script>alert(1)</script>" not in texto
+        assert "&lt;script&gt;" in texto
+
+    def test_pergunta_vazia_volta_com_a_mensagem_sem_chamar_o_modelo(
+        self, com_assistente: TestClient, modelo: ModeloNaRede
+    ) -> None:
+        resposta = com_assistente.post("/assistente", data={"pergunta": "   "})
+
+        assert resposta.status_code == 400
+        assert "Escreva uma pergunta." in resposta.text
+        assert modelo.chamadas == 0
+
+    def test_modelo_indisponivel_mostra_o_aviso(
+        self, com_assistente: TestClient, modelo: ModeloNaRede
+    ) -> None:
+        modelo.status = 429
+
+        resposta = com_assistente.post("/assistente", data={"pergunta": "O que mudou?"})
+
+        assert resposta.status_code == 503
+        assert "limite de uso" in resposta.text
+
+    def test_sem_chave_avisa_que_esta_desligado(
+        self, sem_assistente: TestClient, modelo: ModeloNaRede
+    ) -> None:
+        assert "desligado" in sem_assistente.get("/assistente").text
+
+        resposta = sem_assistente.post("/assistente", data={"pergunta": "O que mudou?"})
+
+        assert resposta.status_code == 503
+        assert modelo.chamadas == 0
