@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -98,3 +100,60 @@ def resposta_ferramentas(*pedidos: tuple[str, dict[str, Any]]) -> SimpleNamespac
 def resposta_recusa() -> SimpleNamespace:
     """O modelo recusou a pergunta por política de uso."""
     return SimpleNamespace(content=[], stop_reason="refusal", usage=_uso(saida=0))
+
+
+class OpenRouterFalso:
+    """Faz o papel do `enviar` do OpenRouter: segue um roteiro e guarda os pedidos."""
+
+    def __init__(self, *passos: Any) -> None:
+        self.passos = list(passos)
+        self.pedidos: list[dict[str, Any]] = []
+
+    @property
+    def chamadas(self) -> int:
+        return len(self.pedidos)
+
+    def __call__(self, pedido: dict[str, Any]) -> dict[str, Any]:
+        # Copia fundo: o assistente continua acrescentando mensagens na lista.
+        self.pedidos.append(copy.deepcopy(pedido))
+        passo = self.passos.pop(0)
+        if isinstance(passo, Exception):
+            raise passo
+        return passo
+
+
+_USO_OPENROUTER = {"prompt_tokens": 100, "completion_tokens": 20}
+
+
+def openrouter_texto(texto: str, *, finish_reason: str = "stop") -> dict[str, Any]:
+    """Resposta final de um modelo do OpenRouter, só com texto."""
+    return {
+        "choices": [
+            {"message": {"role": "assistant", "content": texto}, "finish_reason": finish_reason}
+        ],
+        "usage": _USO_OPENROUTER,
+    }
+
+
+def openrouter_ferramentas(*pedidos: tuple[str, dict[str, Any] | str]) -> dict[str, Any]:
+    """O modelo pede ferramentas, cada uma como ``(nome, argumentos)``."""
+    chamadas = [
+        {
+            "id": f"call_{numero}",
+            "type": "function",
+            "function": {
+                "name": nome,
+                "arguments": argumentos if isinstance(argumentos, str) else json.dumps(argumentos),
+            },
+        }
+        for numero, (nome, argumentos) in enumerate(pedidos, start=1)
+    ]
+    return {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": None, "tool_calls": chamadas},
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": _USO_OPENROUTER,
+    }

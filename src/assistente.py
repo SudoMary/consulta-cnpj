@@ -21,6 +21,7 @@ from datetime import UTC, date, datetime, time
 from typing import Any
 
 import anthropic
+import httpx
 from sqlalchemy import Engine
 
 from . import repo
@@ -33,6 +34,7 @@ from .formatacao import (
     formatar_capital,
     formatar_cnae,
 )
+from .openrouter import Enviar, ErroOpenRouter, enviar_openrouter
 from .servico import (
     DIAS_DE_MUDANCA_RECENTE,
     RegraDeNegocio,
@@ -54,7 +56,10 @@ MAXIMO_DE_MUDANCAS = 50
 # reserva, dentro da mesma chamada: a ideia da fonte reserva, aplicada ao modelo.
 BETA_FALLBACK = "server-side-fallback-2026-07-01"
 
-MENSAGEM_SEM_CHAVE = "O assistente está desligado: defina ANTHROPIC_API_KEY no .env."
+MENSAGEM_SEM_CHAVE = (
+    "O assistente está desligado: defina OPENROUTER_API_KEY (modelo grátis) "
+    "ou ANTHROPIC_API_KEY no .env."
+)
 MENSAGEM_RECUSA = (
     "Não posso responder a essa pergunta. Pergunte sobre as empresas consultadas no site."
 )
@@ -98,7 +103,14 @@ resposta depender de quando o dado foi coletado, diga a data da coleta.\
 
 
 class AssistenteIndisponivel(Exception):
-    """A API do Claude falhou; a mensagem está pronta para mostrar ao usuário."""
+    """A API do modelo falhou; a mensagem está pronta para mostrar ao usuário."""
+
+
+@dataclass(frozen=True)
+class OpenRouter:
+    """Cliente de um modelo grátis do OpenRouter: só a função que manda o pedido."""
+
+    enviar: Enviar
 
 
 @dataclass(frozen=True)
@@ -118,27 +130,43 @@ class _Gasto:
 
     def somar(self, uso: Any) -> None:
         # Tokens lidos do cache e gravados nele também são entrada.
-        self.tokens_entrada += (
+        self.somar_tokens(
             uso.input_tokens
             + (uso.cache_creation_input_tokens or 0)
-            + (uso.cache_read_input_tokens or 0)
+            + (uso.cache_read_input_tokens or 0),
+            uso.output_tokens,
         )
-        self.tokens_saida += uso.output_tokens
+
+    def somar_tokens(self, entrada: int, saida: int) -> None:
+        self.tokens_entrada += entrada
+        self.tokens_saida += saida
 
 
-def criar_cliente(config: Settings) -> anthropic.Anthropic | None:
-    """Cliente da API do Claude, ou ``None`` quando não há chave configurada."""
-    if config.anthropic_api_key is None:
-        return None
-    # O SDK já repete 429, 5xx e falha de conexão, com espera crescente.
-    return anthropic.Anthropic(api_key=config.anthropic_api_key.get_secret_value(), timeout=60.0)
+def criar_cliente(
+    config: Settings, *, http: httpx.Client
+) -> tuple[anthropic.Anthropic | OpenRouter, str] | None:
+    """Cliente e modelo do assistente, ou ``None`` quando não há chave configurada.
+
+    Com a chave da Anthropic, usa o Claude; senão, com a do OpenRouter, um
+    modelo grátis.
+    """
+    if config.anthropic_api_key is not None:
+        # O SDK já repete 429, 5xx e falha de conexão, com espera crescente.
+        claude = anthropic.Anthropic(
+            api_key=config.anthropic_api_key.get_secret_value(), timeout=60.0
+        )
+        return claude, config.assistente_modelo
+    if config.openrouter_api_key is not None:
+        enviar = enviar_openrouter(config.openrouter_api_key.get_secret_value(), http=http)
+        return OpenRouter(enviar), config.assistente_modelo_openrouter
+    return None
 
 
 def perguntar(
     pergunta: str,
     *,
     motor: Engine,
-    cliente: anthropic.Anthropic,
+    cliente: anthropic.Anthropic | OpenRouter,
     modelo: str,
     limite_diario: int,
     agora: datetime | None = None,
@@ -165,7 +193,16 @@ def perguntar(
     ]
     gasto = _Gasto()
     try:
-        desfecho, resposta = _conversar(cliente, modelo, mensagens, motor, agora, gasto)
+        if isinstance(cliente, OpenRouter):
+            desfecho, resposta = _conversar_openrouter(
+                cliente.enviar, modelo, texto, motor, agora, gasto
+            )
+        else:
+            desfecho, resposta = _conversar(cliente, modelo, mensagens, motor, agora, gasto)
+    except ErroOpenRouter as erro:
+        _log.warning("O OpenRouter falhou depois de %s chamada(s): %s", gasto.chamadas, erro)
+        _registrar(motor, agora, texto, modelo, "erro", gasto)
+        raise AssistenteIndisponivel(str(erro)) from erro
     except anthropic.APIError as erro:
         _log.exception("A API do Claude falhou depois de %s chamada(s)", gasto.chamadas)
         _registrar(motor, agora, texto, modelo, "erro", gasto)
@@ -225,16 +262,88 @@ def _parametros(modelo: str, mensagens: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _conversar_openrouter(
+    enviar: Enviar,
+    modelo: str,
+    texto: str,
+    motor: Engine,
+    agora: datetime,
+    gasto: _Gasto,
+) -> tuple[str, str]:
+    """O mesmo laço, no formato de chat da OpenAI, que o OpenRouter usa."""
+    mensagens: list[dict[str, Any]] = [
+        {"role": "system", "content": SISTEMA},
+        {"role": "user", "content": _primeira_mensagem(texto, agora)},
+    ]
+    for _ in range(MAXIMO_DE_CHAMADAS):
+        gasto.chamadas += 1
+        resposta = enviar(
+            {"model": modelo, "messages": mensagens, "tools": _FERRAMENTAS_OPENAI, "temperature": 0}
+        )
+        uso = resposta.get("usage") or {}
+        gasto.somar_tokens(uso.get("prompt_tokens") or 0, uso.get("completion_tokens") or 0)
+        try:
+            escolha = resposta["choices"][0]
+            mensagem = escolha["message"]
+        except (KeyError, IndexError, TypeError):
+            return "sem_conclusao", MENSAGEM_SEM_CONCLUSAO
+        if mensagem.get("refusal") or escolha.get("finish_reason") == "content_filter":
+            return "recusada", MENSAGEM_RECUSA
+
+        chamadas = mensagem.get("tool_calls") or []
+        if not chamadas:
+            final = (mensagem.get("content") or "").strip()
+            # Resposta cortada pelo limite de tokens não vai pela metade ao usuário.
+            if final and escolha.get("finish_reason") != "length":
+                return "respondida", final
+            return "sem_conclusao", MENSAGEM_SEM_CONCLUSAO
+
+        mensagens.append(
+            {"role": "assistant", "content": mensagem.get("content"), "tool_calls": chamadas}
+        )
+        for chamada in chamadas:
+            funcao = chamada.get("function") or {}
+            conteudo, erro = _rodar_ferramenta(
+                funcao.get("name", ""), funcao.get("arguments"), motor, agora
+            )
+            mensagens.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": chamada.get("id"),
+                    "content": f"Erro: {conteudo}" if erro else conteudo,
+                }
+            )
+    return "sem_conclusao", MENSAGEM_SEM_CONCLUSAO
+
+
 def _executar(pedido: Any, motor: Engine, agora: datetime) -> dict[str, Any]:
-    """Roda a ferramenta pedida. Erro previsto volta ao modelo, que explica ao usuário."""
-    ferramenta = _FERRAMENTAS.get(pedido.name)
+    """Roda a ferramenta pedida pelo Claude e monta o resultado no formato dele."""
+    conteudo, erro = _rodar_ferramenta(pedido.name, pedido.input, motor, agora)
+    return _resultado(pedido.id, conteudo, erro=erro)
+
+
+def _rodar_ferramenta(nome: str, entrada: Any, motor: Engine, agora: datetime) -> tuple[str, bool]:
+    """Roda a ferramenta; devolve (conteúdo, se é erro). Erro previsto volta ao modelo.
+
+    Os parâmetros são conferidos aqui porque nem toda API garante que o modelo
+    siga o esquema. Todos são texto, então valor de outro tipo vira texto.
+    """
+    ferramenta = _FERRAMENTAS.get(nome)
     if ferramenta is None:
-        return _resultado(pedido.id, f"Ferramenta desconhecida: {pedido.name}.", erro=True)
+        return f"Ferramenta desconhecida: {nome}.", True
+    if isinstance(entrada, str) or entrada is None:
+        try:
+            entrada = json.loads(entrada or "{}")
+        except json.JSONDecodeError:
+            return "Parâmetros inválidos: o JSON veio malformado.", True
+    if not isinstance(entrada, dict) or set(entrada) != _PARAMETROS[nome]:
+        esperados = ", ".join(sorted(_PARAMETROS[nome])) or "nenhum"
+        return f"Parâmetros inválidos para {nome}; esperados: {esperados}.", True
     try:
-        dados = ferramenta(motor, agora=agora, **pedido.input)
+        dados = ferramenta(motor, agora=agora, **{k: str(v) for k, v in entrada.items()})
     except RegraDeNegocio as erro:
-        return _resultado(pedido.id, str(erro), erro=True)
-    return _resultado(pedido.id, json.dumps(dados, ensure_ascii=False))
+        return str(erro), True
+    return json.dumps(dados, ensure_ascii=False), False
 
 
 def _resultado(id_do_pedido: str, conteudo: str, *, erro: bool = False) -> dict[str, Any]:
@@ -489,3 +598,20 @@ DEFINICOES: list[dict[str, Any]] = [
         data="Data inicial no formato AAAA-MM-DD, no horário de Brasília.",
     ),
 ]
+
+# As mesmas ferramentas no formato da OpenAI, que o OpenRouter usa.
+_FERRAMENTAS_OPENAI: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": definicao["name"],
+            "description": definicao["description"],
+            "parameters": definicao["input_schema"],
+        },
+    }
+    for definicao in DEFINICOES
+]
+
+_PARAMETROS: dict[str, set[str]] = {
+    definicao["name"]: set(definicao["input_schema"]["required"]) for definicao in DEFINICOES
+}
